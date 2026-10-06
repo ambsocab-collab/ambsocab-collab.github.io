@@ -117,6 +117,7 @@ async function abrirHoja(id) {
   E.sec = E.modelo[0].nombre; E.vista = "hoja"; E.grupo = {};
   await DB.set("ultima", id);
   pintar();
+  precargarFotos();
 }
 function marcarObligatorias() {  // las tareas bajo el rótulo rojo (retrasadas) se contestan siempre
   for (const p of E.modelo) for (const s of p.secciones) { let rojo = false;
@@ -287,6 +288,7 @@ function fichaUI(p, sec, it, g) {
   }
   if (datos.children.length) card.append(datos);
   if (it.detalle) card.append(h("details", { class: "mas" }, h("summary", {}, "Ver detalle"), h("p", { class: "detalle" }, it.detalle)));
+  if (it.id && /^T-[A-Z]{3}-\d{4}$/.test(it.id)) { const g = galeria(it.id); if (g) card.append(g); }
   const principales = [], secundarios = [];
   for (const f of campos) (OPC(f) && campos.length > 2 ? secundarios : principales).push(f);
   for (const f of principales) card.append(campoUI(p, it, f));
@@ -303,6 +305,44 @@ function fichaUI(p, sec, it, g) {
   }
   return card;
 }
+/* ---------- fotos de las tareas (del índice del repositorio) ---------- */
+function galeria(id) {
+  const grupos = REPO.fotosDe(id);
+  if (!grupos.length) return null;
+  const todas = grupos.flatMap(g => g.archivos.map(f => ({ ...f, tipo: g.tipo })));
+  const cont = h("div", { class: "fotos" });
+  for (const g of grupos) {
+    cont.append(h("div", { class: "fotos-cab" }, h("span", {}, `${g.tipo} · ${g.archivos.length}`), h("a", { href: g.carpeta, target: "_blank", rel: "noopener" }, "Carpeta ↗")));
+    const fila = h("div", { class: "fotos-fila" });
+    for (const f of g.archivos) {
+      const img = h("img", { src: REPO.miniatura(f.id, 400), alt: f.n, loading: "lazy", referrerpolicy: "no-referrer" });
+      const b = h("button", { type: "button", class: "foto", title: f.n, onclick: () => verFoto(todas, todas.findIndex(x => x.id === f.id)) }, img);
+      img.addEventListener("error", () => (window.caches ? caches.open("hoja-campo-fotos").then(c => c.delete(img.src)) : 0, b.replaceWith(h("a", { class: "foto sin", href: f.u, target: "_blank", rel: "noopener" }, "Foto ↗"))));
+      fila.append(b);
+    }
+    cont.append(fila);
+  }
+  return cont;
+}
+function verFoto(lista, i) {
+  const d = $("#visor"); d.innerHTML = "";
+  const f = lista[i];
+  const img = h("img", { src: REPO.miniatura(f.id, 1600), alt: f.n, referrerpolicy: "no-referrer" });
+  img.addEventListener("error", () => img.replaceWith(h("p", {}, "No se puede mostrar aquí (sin conexión o sin sesión de Google). Ábrela en Drive.")));
+  d.append(h("div", { class: "visor-cab" }, h("span", {}, `${f.tipo} · ${i + 1} de ${lista.length}`), h("button", { type: "button", class: "btn", onclick: () => d.close() }, "Cerrar")),
+    img, h("div", { class: "acciones" },
+      h("button", { type: "button", class: "btn", disabled: i === 0, onclick: () => verFoto(lista, i - 1) }, "‹ Anterior"),
+      h("a", { class: "btn", href: f.u, target: "_blank", rel: "noopener" }, "Abrir en Drive ↗"),
+      h("button", { type: "button", class: "btn", disabled: i === lista.length - 1, onclick: () => verFoto(lista, i + 1) }, "Siguiente ›")));
+  if (!d.open) d.showModal();
+}
+function precargarFotos() {  // con conexión, deja las miniaturas de las tareas de la hoja guardadas para verlas sin ella
+  if (!navigator.onLine || !E.modelo) return;
+  const ids = new Set(); for (const p of E.modelo) for (const { it } of fichas(p)) if (it.id && /^T-/.test(it.id)) ids.add(it.id);
+  let n = 0;
+  for (const id of ids) for (const g of REPO.fotosDe(id)) for (const f of g.archivos) if (n++ < 300) fetch(REPO.miniatura(f.id, 400), { mode: "no-cors", credentials: "include" }).catch(() => {});
+}
+
 const OPC = f => /^(Observaciones|Nota|Notas|Lo que dice el responsable|Nueva fecha propuesta|Otra medida que propone|Decisión|Tipo de evidencia|Evidencia vista|Foto o nota|Notas de la entrevista)/i.test(f.etiqueta);
 const OBLIG = f => /^(Comprobado|Motivo del retraso|Estado|Resultado|¿Recibido hoy\?)$/.test(f.etiqueta);
 
@@ -358,6 +398,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#tab-repo").addEventListener("click", () => { E.vista = "repo"; pintar(); });
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  await REPO.iniciar();
   try { const ultima = await DB.get("ultima"); if (ultima && await DB.leer(ultima)) { await abrirHoja(ultima); return; } } catch (e) { console.error(e); }
   E.vista = "inicio"; pintar();
 });

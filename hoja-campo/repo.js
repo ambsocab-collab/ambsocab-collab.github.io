@@ -10,11 +10,35 @@ const REPO = (() => {
   const cuenta = n => n.h ? n.h.reduce((a, x) => a + (x.h ? cuenta(x) : 1), 0) : 1;
   const coincide = (n, q) => n.n.toLowerCase().includes(q) || (n.h || []).some(x => coincide(x, q));
 
+  // fotos de las tareas: las carpetas «<T-id> · …» (hallazgo en la carpeta de la visita; «· evidencia», del responsable)
+  let fotos = null;
+  const idDrive = u => (/\/d\/([\w-]+)/.exec(u || "") || [])[1] || null;
+  function indexarFotos() {
+    fotos = new Map();
+    const andar = (n, ruta) => {
+      for (const x of n.h || []) {
+        if (!x.h) continue;
+        const m = /^(T-[A-Z]{3}-\d{4})\s*·\s*(.*)$/.exec(x.n);
+        if (m) {
+          const visita = (/Visitas\/(\d{4}-\d{4})/.exec(ruta) || [])[1];
+          const tipoF = /·\s*evidencia\s*$/i.test(x.n) ? "Evidencia del responsable" : visita ? `Visita ${visita.slice(0, 2)}/${visita.slice(2, 4)}/${visita.slice(5)}` : "Hallazgo";
+          const archivos = x.h.filter(f => !f.h && /image/.test(f.m || "")).map(f => ({ id: idDrive(f.u), u: f.u, n: f.n })).filter(f => f.id);
+          if (archivos.length) { const l = fotos.get(m[1]) || []; l.push({ tipo: tipoF, carpeta: x.u, archivos }); fotos.set(m[1], l); }
+        }
+        andar(x, ruta + "/" + x.n);
+      }
+    };
+    if (indice) andar(indice.raiz, "");
+  }
+  const fotosDe = id => { if (!fotos) indexarFotos(); return fotos.get(id) || []; };
+  const miniatura = (id, ancho) => `https://drive.google.com/thumbnail?id=${id}&sz=w${ancho}`;
+  async function iniciar() { try { indice = await DB.get("repo"); } catch (e) { indice = null; } fotos = null; }
+
   async function cargar(file) {
     try {
       const j = JSON.parse(await file.text());
       if (!j.raiz || !j.raiz.h) throw new Error("sin raíz");
-      indice = j; await DB.set("repo", j); pintar(); aviso("Índice del repositorio cargado.");
+      indice = j; fotos = null; await DB.set("repo", j); pintar(); aviso("Índice del repositorio cargado.");
     } catch (e) { aviso("Ese archivo no es el índice del repositorio (.json)."); }
   }
   function nodo(n, ruta, q) {
@@ -51,5 +75,5 @@ const REPO = (() => {
     main.append(s);
   }
   document.addEventListener("DOMContentLoaded", () => document.querySelector("#cargar-repo").addEventListener("change", e => { cargar(e.target.files[0]); e.target.value = ""; }));
-  return { pintar };
+  return { pintar, iniciar, fotosDe, miniatura, hayIndice: () => !!indice };
 })();
