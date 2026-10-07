@@ -387,6 +387,8 @@ function campoUI(p, it, f) {
 }
 function pintarSuave() { const y = window.scrollY; const foco = document.activeElement && document.activeElement.id; pintar(); window.scrollTo({ top: y }); if (foco && document.getElementById(foco)) document.getElementById(foco).focus({ preventScroll: true }); }
 
+window.E = E; window.pintarSuave = () => pintarSuave();
+
 /* ---------- arranque ---------- */
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); E.instalar = e; if (!E.modelo) pintar(); });
 document.addEventListener("DOMContentLoaded", async () => {

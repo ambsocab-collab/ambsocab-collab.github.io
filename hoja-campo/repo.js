@@ -32,7 +32,52 @@ const REPO = (() => {
   }
   const fotosDe = id => { if (!fotos) indexarFotos(); return fotos.get(id) || []; };
   const miniatura = (id, ancho) => `https://drive.google.com/thumbnail?id=${id}&sz=w${ancho}`;
-  async function iniciar() { try { indice = await DB.get("repo"); } catch (e) { indice = null; } fotos = null; }
+  /* actualización automática: la app pide el índice a la Apps Script de la cuenta del sistema (acción «indice», con la
+     clave de solo lectura) al abrirse con conexión, como mucho cada 30 minutos */
+  let conexion = null, estado = "", borrador = null, fallo = false;
+  async function iniciar() {
+    try { indice = await DB.get("repo"); conexion = await DB.get("conexion"); } catch (e) { indice = null; }
+    fotos = null;
+    actualizar(false);
+    window.addEventListener("online", () => actualizar(false));
+  }
+  async function actualizar(forzar) {
+    if (!conexion || !navigator.onLine) return false;
+    if (!forzar && indice && indice.recibido && Date.now() - indice.recibido < 30 * 60e3) return false;
+    estado = "Actualizando desde Drive…"; refrescar();
+    try {
+      const r = await fetch(conexion.url, { method: "POST", body: JSON.stringify({ accion: "indice", clave: conexion.clave, forzar: !!forzar }) });
+      const j = await r.json();
+      if (!j.ok || !j.raiz) throw new Error(j.error || "respuesta sin índice");
+      j.recibido = Date.now(); indice = j; fotos = null; await DB.set("repo", j);
+      estado = ""; refrescar(true); return true;
+    } catch (e) { estado = "No se pudo actualizar desde Drive: " + e.message; refrescar(); return false; }
+  }
+  function refrescar(todo) {
+    const el = document.querySelector("#estado-repo"); if (el) el.textContent = estado;
+    if (todo && typeof pintar === "function" && window.E && (E.vista === "repo" || E.modelo)) window.pintarSuave ? pintarSuave() : 0;
+  }
+  async function conectar(url, clave) {
+    url = url.trim(); clave = clave.trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(url)) { aviso("La dirección tiene que ser la de la aplicación web de Apps Script (https://script.google.com/macros/s/…/exec)."); return; }
+    const antes = conexion; conexion = { url, clave }; borrador = { url, clave };
+    if (await actualizar(true)) { await DB.set("conexion", conexion); borrador = null; aviso("Conectado: el repositorio y las fotos se actualizan solos."); }
+    else { conexion = antes; fallo = true; aviso("No se pudo conectar. Revisa la dirección y la clave."); }
+    pintar();
+  }
+  function panelConexion() {
+    const v = borrador || conexion || {};
+    const url = h("input", { type: "url", id: "con-url", placeholder: "https://script.google.com/macros/s/…/exec", value: v.url || "" });
+    const clave = h("input", { type: "password", id: "con-clave", placeholder: "Clave de lectura", value: v.clave || "" });
+    const abierto = !conexion || fallo; fallo = false;
+    return h("details", { class: "panel conexion", open: abierto },
+      h("summary", {}, conexion ? "Conectado con Drive · se actualiza solo" : "Conectar con Drive para que se actualice solo"),
+      h("p", { class: "nota" }, "Pega la dirección de la aplicación web del sistema y la clave de lectura. Se guardan solo en este dispositivo."),
+      h("label", { for: "con-url" }, "Dirección"), url, h("label", { for: "con-clave" }, "Clave de lectura"), clave,
+      h("div", { class: "acciones" },
+        conexion ? h("button", { type: "button", class: "btn", onclick: async () => { conexion = null; await DB.set("conexion", null); pintar(); } }, "Desconectar") : null,
+        h("button", { type: "button", class: "btn primario", onclick: () => conectar(url.value, clave.value) }, conexion ? "Guardar y actualizar" : "Conectar")));
+  }
 
   async function cargar(file) {
     try {
@@ -64,14 +109,17 @@ const REPO = (() => {
     if (!indice) {
       s.append(h("div", { class: "panel bienvenida" }, h("h2", {}, "Repositorio del sistema de PRL"),
         h("p", {}, "Aquí aparecen todas las carpetas del sistema en Drive. Al pulsar una carpeta se despliega su contenido, y cada archivo (PDF, Word, Excel…) se abre directamente."),
-        h("p", {}, "Falta cargar el índice: el sistema lo genera desde Drive (solo nombres y enlaces) y se carga una vez; cuando cambien las carpetas, se vuelve a cargar."), cargarBtn));
+        h("p", {}, "Conéctala con Drive (abajo) y el índice llega solo y se mantiene al día. También puedes cargar a mano el archivo del índice."), cargarBtn),
+        panelConexion(), h("p", { class: "nota", id: "estado-repo" }, estado));
       main.append(s); return;
     }
     const buscar = h("input", { type: "search", id: "buscar-repo", placeholder: "Buscar por nombre…", value: filtro, "aria-label": "Buscar en el repositorio" });
     buscar.addEventListener("input", () => { filtro = buscar.value; const l = s.querySelector(".arbol"); l.replaceWith(arbol()); });
     const arbol = () => { const q = filtro.trim().toLowerCase(); const ul = h("ul", { class: "arbol" }, indice.raiz.h.map(x => nodo(x, "", q))); if (q && !ul.children.length) ul.append(h("li", { class: "vacio" }, "Nada con ese nombre.")); return ul; };
-    s.append(h("div", { class: "repo-cab" }, h("div", {}, h("h2", {}, indice.raiz.n), h("p", { class: "nota" }, `${cuenta(indice.raiz)} archivos · índice del ${new Date(indice.generado).toLocaleDateString("es-ES")}`)), cargarBtn),
-      buscar, arbol());
+    const cuando = new Date(indice.generado).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    s.append(h("div", { class: "repo-cab" }, h("div", {}, h("h2", {}, indice.raiz.n), h("p", { class: "nota" }, `${cuenta(indice.raiz)} archivos · al día a ${cuando}`), h("p", { class: "nota", id: "estado-repo" }, estado)),
+        h("div", { class: "acciones" }, conexion ? h("button", { type: "button", class: "btn", onclick: () => actualizar(true) }, "Actualizar ahora") : null, cargarBtn)),
+      panelConexion(), buscar, arbol());
     main.append(s);
   }
   document.addEventListener("DOMContentLoaded", () => document.querySelector("#cargar-repo").addEventListener("change", e => { cargar(e.target.files[0]); e.target.value = ""; }));
