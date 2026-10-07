@@ -55,7 +55,7 @@ const REPO = (() => {
   }
   function refrescar(todo) {
     const el = document.querySelector("#estado-repo"); if (el) el.textContent = estado;
-    if (todo && typeof pintar === "function" && window.E && (E.vista === "repo" || E.modelo)) window.pintarSuave ? pintarSuave() : 0;
+    if (todo && window.E && typeof window.pintarSuave === "function" && (E.vista === "repo" || E.modelo)) window.pintarSuave();
   }
   async function conectar(url, clave) {
     url = url.trim(); clave = clave.trim();
@@ -123,5 +123,10 @@ const REPO = (() => {
     main.append(s);
   }
   document.addEventListener("DOMContentLoaded", () => document.querySelector("#cargar-repo").addEventListener("change", e => { cargar(e.target.files[0]); e.target.value = ""; }));
-  return { pintar, iniciar, fotosDe, miniatura, hayIndice: () => !!indice };
+  async function pedir(cuerpo) {  // otra petición de solo lectura a la Apps Script (hojas de campo)
+    if (!conexion) throw new Error("sin conexión con Drive");
+    const r = await fetch(conexion.url, { method: "POST", body: JSON.stringify({ ...cuerpo, clave: conexion.clave }) });
+    const j = await r.json(); if (!j.ok) throw new Error(j.error || "respuesta vacía"); return j;
+  }
+  return { pintar, iniciar, fotosDe, miniatura, hayIndice: () => !!indice, conectado: () => !!conexion, pedir };
 })();

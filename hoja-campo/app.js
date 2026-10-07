@@ -93,8 +93,11 @@ function antesDeIrte() {
 /* ---------- carga ---------- */
 async function cargarArchivo(file) {
   if (!file) return;
+  return cargarBytes(file.name, await file.arrayBuffer());
+}
+async function cargarBytes(nombre, bytes) {
+  const file = { name: nombre };
   try {
-    const bytes = await file.arrayBuffer();
     const libro = await XL.read(bytes);
     if (!libro.sheets.some(s => s.name === "Hoy")) { aviso("Este Excel no es una hoja de campo: no tiene la pestaña «Hoy»."); return; }
     const hoy = libro.sheets.find(s => s.name === "Hoy");
@@ -187,7 +190,8 @@ function pintar() {
 
 function pintarInicio(main) {
   const s = h("section", { class: "vista" });
-  s.append(h("div", { class: "panel bienvenida" },
+  if (REPO.conectado()) s.append(hojasDrive());
+  s.append(REPO.conectado() ? h("div", { class: "panel" }, h("p", { class: "nota" }, "¿La hoja no está en Drive? Cárgala desde un archivo .xlsx."), h("label", { class: "btn", for: "cargar" }, "Cargar desde archivo")) : h("div", { class: "panel bienvenida" },
     h("h2", {}, "Carga la hoja de campo de la visita"),
     h("p", {}, "En Drive, abre la hoja de campo de la visita y descárgala como Excel (Archivo → Descargar → Microsoft Excel). Después cárgala aquí. Todo lo que rellenes se queda en este dispositivo hasta que lo exportes."),
     h("label", { class: "btn primario grande", for: "cargar" }, "Cargar hoja de campo (.xlsx)")));
@@ -204,6 +208,43 @@ function pintarInicio(main) {
   });
   if (E.instalar) s.append(h("div", { class: "panel" }, h("p", {}, "Instala la app para abrirla desde su icono y usarla sin conexión."), h("button", { class: "btn primario", type: "button", onclick: async () => { E.instalar.prompt(); await E.instalar.userChoice; E.instalar = null; pintar(); } }, "Instalar la app")));
   main.append(s);
+}
+
+/* ---------- hojas de campo de Drive (por la conexión del repositorio) ---------- */
+const CENTROS = { BAE: "Baena", BOG: "Bogarre", CAB: "Cabra", ESP: "Espejo", ETJ: "El Tejar", MAN: "Mancha Real", MAR: "Marchena", PAB: "Pedro Abad", PAL: "Palenciana" };
+const fechaES = iso => iso.split("-").reverse().join("/");
+let hojasD = null, centroD = null;
+function hojasDrive() {
+  const panel = h("div", { class: "panel" }, h("h3", {}, "Hojas de campo en Drive"));
+  const cuerpo = h("div", { class: "cuerpo-drive" }, h("p", { class: "nota" }, navigator.onLine ? "Buscando en Drive…" : "Sin conexión: conéctate para traer una hoja de Drive."));
+  panel.append(cuerpo);
+  const pintarLista = () => {
+    cuerpo.innerHTML = "";
+    if (!hojasD.length) { cuerpo.append(h("p", { class: "nota" }, "No hay hojas de campo en Drive.")); return; }
+    const centros = [...new Set(hojasD.map(x => x.centro))];
+    const hoy = new Date().toISOString().slice(0, 10);
+    centroD = centroD || (hojasD.find(x => x.fecha >= hoy) || hojasD[0]).centro;
+    cuerpo.append(h("p", { class: "nota" }, "¿Qué centro visitas?"), h("div", { class: "chips" }, centros.map(c => h("button", { type: "button", class: "chip", "aria-pressed": String(c === centroD), onclick: () => { centroD = c; pintarLista(); } }, CENTROS[c] || c))));
+    const visitas = hojasD.filter(x => x.centro === centroD);
+    for (const x of visitas) {
+      const proxima = x === visitas.filter(v => v.fecha >= hoy).slice(-1)[0];
+      cuerpo.append(h("div", { class: "fila-hoja" },
+        h("button", { type: "button", class: "abrir" + (proxima ? " destacada" : ""), onclick: () => traerHoja(x) },
+          h("strong", {}, `${CENTROS[x.centro] || x.centro} · visita del ${fechaES(x.fecha)}`), h("span", {}, (proxima ? "Próxima visita · " : "") + "cambiada en Drive " + new Date(x.modificado).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })))));
+    }
+  };
+  if (hojasD) pintarLista();
+  else if (navigator.onLine) REPO.pedir({ accion: "hojas" }).then(j => { hojasD = j.hojas; pintarLista(); })
+    .catch(e => { cuerpo.innerHTML = ""; cuerpo.append(h("p", { class: "nota alerta" }, "No se pudo leer Drive: " + e.message)); });
+  return panel;
+}
+async function traerHoja(x) {
+  aviso("Trayendo la hoja de Drive…");
+  try {
+    const j = await REPO.pedir({ accion: "hoja", id: x.id });
+    const bin = atob(j.datos); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    await cargarBytes(j.nombre, bytes.buffer);
+  } catch (e) { aviso("No se pudo traer la hoja: " + e.message); }
 }
 
 function pintarHoja(p) {
@@ -387,7 +428,7 @@ function campoUI(p, it, f) {
 }
 function pintarSuave() { const y = window.scrollY; const foco = document.activeElement && document.activeElement.id; pintar(); window.scrollTo({ top: y }); if (foco && document.getElementById(foco)) document.getElementById(foco).focus({ preventScroll: true }); }
 
-window.E = E; window.pintarSuave = () => pintarSuave();
+window.E = E;  // repo.js lo mira para repintar al llegar el índice
 
 /* ---------- arranque ---------- */
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); E.instalar = e; if (!E.modelo) pintar(); });
