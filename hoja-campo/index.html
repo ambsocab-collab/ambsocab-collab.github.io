@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Hoja de campo · El Tejar</title>
+<title>Hoja de campo</title>
 <meta name="theme-color" content="#006D2A">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
-/* Formato DSSL de El Tejar (gp-formato-documentos/assets/formato-dssl.json): Arial, verde en títulos y cabeceras,
+/* Formato DSSL de la empresa (gp-formato-documentos/assets/formato-dssl.json): Arial, verde en títulos y cabeceras,
    rojo para lo que corre prisa, fondos verde y gris claros. Carril de pestañas a la izquierda en tablet y PC; abajo en móvil. */
 :root{
   --verde-osc:#006D2A; --verde:#008C32; --rojo:#E6333C; --texto:#222624; --gris:#6B7470; --borde:#CBD4D0;
@@ -195,7 +195,7 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
 <body>
 <header class="barra">
   <div class="fila1">
-    <div class="logo"><img src="icons/logo.png" alt="El Tejar" width="30" height="34"></div>
+    <div class="logo"><img src="icons/logo.png" alt="Logotipo de la empresa" width="30" height="34"></div>
     <div class="tit"><h1 id="titulo">Hoja de campo</h1><span id="guardado" aria-live="polite"></span></div>
     <div class="acciones" id="acciones-hoja" hidden>
       <button class="btn" id="hojas" type="button">Hojas</button>
@@ -219,6 +219,7 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
 <dialog id="visor" class="visor"></dialog>
 <script src="vendor/jszip.min.js"></script>
 <script src="xlsx.js"></script>
+<script src="empresa.js"></script>
 <script src="modelo.js"></script>
 <script src="app.js"></script>
 <script src="repo.js"></script>

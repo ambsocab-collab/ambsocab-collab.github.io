@@ -1,4 +1,4 @@
-/* Hoja de campo de El Tejar: la app. Guarda en el dispositivo (IndexedDB) cada hoja cargada y lo rellenado; exporta
+/* Hoja de campo de la empresa: la app. Guarda en el dispositivo (IndexedDB) cada hoja cargada y lo rellenado; exporta
    el mismo .xlsx con las respuestas escritas en sus casillas, para procesarlo como siempre (leer_hoja.py). */
 "use strict";
 
@@ -95,7 +95,63 @@ async function cargarArchivo(file) {
   if (!file) return;
   return cargarBytes(file.name, await file.arrayBuffer());
 }
-async function cargarBytes(nombre, bytes) {
+/* guarda una hoja de Drive en el dispositivo sin abrirla (la de hoy o la próxima, para tenerla sin cobertura);
+   nunca pisa una que ya tenga casillas rellenadas */
+async function guardarSinAbrir(nombre, bytes, modificado) {
+  const id = nombre.replace(/\.xlsx$/i, "");
+  const previa = await DB.leer(id);
+  if (previa && Object.keys(previa.edits || {}).some(k => Object.keys(previa.edits[k] || {}).length)) return false;
+  const libro = await XL.read(bytes);
+  const hoy = libro.sheets.find(s => s.name === "Hoy"); if (!hoy) return false;
+  await DB.guardar({ id, nombre, titulo: (hoy.cells.get("A1") || {}).v || nombre, bytes, edits: {}, cargada: Date.now(),
+    actualizada: Date.now(), drive: modificado || null, precargada: true });
+  return true;
+}
+const RE_NOMBRE = /^([A-Z]{3}) (\d{2})(\d{2})(\d{4}) - Hoja de campo/;
+const fechaDe = id => { const m = RE_NOMBRE.exec(id || ""); return m ? `${m[4]}-${m[3]}-${m[2]}` : null; };
+const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+function base64ABytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
+
+/* al abrir la app: la hoja de la visita de hoy se abre sola; con conexión, se traen de Drive la de hoy y la de la
+   próxima visita (si en el dispositivo no hay ya una con datos rellenados) */
+async function sincronizarDrive() {
+  if (!REPO.conectado() || !navigator.onLine) return [];
+  const espera = new Promise((_, mal) => setTimeout(() => mal(new Error("Drive tarda demasiado")), 12000));
+  const j = await Promise.race([REPO.pedir({ accion: "hojas" }), espera]);
+  hojasD = j.hojas;
+  const hoy = hoyISO();
+  const proxima = hojasD.filter(x => x.fecha > hoy).sort((a, b) => a.fecha < b.fecha ? -1 : 1)[0];
+  const traer = [...hojasD.filter(x => x.fecha === hoy), ...(proxima ? hojasD.filter(x => x.fecha === proxima.fecha) : [])];
+  const traidas = [];
+  for (const x of traer) {
+    const local = await DB.leer(x.nombre);
+    if (local && local.drive && local.drive >= x.modificado) continue;   // ya está la última versión
+    if (local && !local.drive && !local.precargada) continue;            // cargada a mano: no se toca
+    if (local && Object.values(local.edits || {}).some(o => Object.keys(o || {}).length)) continue;  // ya rellenada aquí
+    try { const r = await REPO.pedir({ accion: "hoja", id: x.id }); if (await guardarSinAbrir(/\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", base64ABytes(r.datos), x.modificado)) traidas.push(x); }
+    catch (e) { console.error(e); }
+  }
+  return traidas;
+}
+async function abrirLaDeHoy() {
+  const hoy = hoyISO();
+  const deHoy = async () => (await DB.lista()).filter(x => fechaDe(x.id) === hoy);
+  let locales = await deHoy();
+  const abierta = locales.length === 1 ? locales[0].id : null;
+  if (abierta) { await abrirHoja(abierta); aviso(`Hoja de hoy abierta: ${locales[0].titulo}`); }
+  let traidas = [];
+  try { traidas = await sincronizarDrive(); } catch (e) { console.error(e); }
+  if (abierta) {  // la abierta se ha actualizado en Drive y aquí no se había rellenado nada: se recarga
+    if (traidas.some(x => x.nombre === abierta) && E.hoja && E.hoja.id === abierta) { await abrirHoja(abierta); aviso("Hoja de hoy actualizada desde Drive."); }
+    return true;
+  }
+  locales = await deHoy();
+  if (locales.length === 1) { await abrirHoja(locales[0].id); aviso(`Hoja de hoy abierta: ${locales[0].titulo}`); return true; }
+  if (locales.length > 1) { E.vista = "inicio"; E.modelo = null; pintar(); aviso(`Hoy tienes ${locales.length} visitas: elige la hoja.`); return true; }
+  return false;
+}
+
+async function cargarBytes(nombre, bytes, drive) {
   const file = { name: nombre };
   try {
     const libro = await XL.read(bytes);
@@ -104,7 +160,7 @@ async function cargarBytes(nombre, bytes) {
     const titulo = (hoy.cells.get("A1") || {}).v || file.name;
     const id = file.name.replace(/\.xlsx$/i, "");
     const previa = await DB.leer(id);
-    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now() };
+    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now(), drive: drive || null };
     if (previa && Object.keys(previa.edits || {}).length) {
       if (!await confirmar(`Ya tienes «${previa.titulo}» con datos rellenados en este dispositivo. ¿Sustituirla por el archivo nuevo? Lo rellenado aquí y no exportado se pierde.`, "Sustituir")) return;
     }
@@ -202,7 +258,7 @@ function pintarInicio(main) {
     for (const x of hs.sort((a, b) => b.actualizada - a.actualizada)) {
       const n = Object.values(x.edits || {}).reduce((a, o) => a + Object.keys(o).length, 0);
       lista.append(h("div", { class: "fila-hoja" },
-        h("button", { type: "button", class: "abrir", onclick: () => abrirHoja(x.id) }, h("strong", {}, x.titulo), h("span", {}, `${n} casillas rellenadas · ${x.exportada ? "exportada " + new Date(x.exportada).toLocaleDateString("es-ES") : "sin exportar"}`)),
+        h("button", { type: "button", class: "abrir" + (fechaDe(x.id) === hoyISO() ? " destacada" : ""), onclick: () => abrirHoja(x.id) }, h("strong", {}, (fechaDe(x.id) === hoyISO() ? "Hoy · " : "") + x.titulo), h("span", {}, !n && x.precargada ? "descargada de Drive, lista para usar sin conexión" : `${n} casillas rellenadas · ${x.exportada ? "exportada " + new Date(x.exportada).toLocaleDateString("es-ES") : "sin exportar"}`)),
         h("button", { type: "button", class: "btn", onclick: async () => { if (await confirmar(`¿Quitar «${x.titulo}» de este dispositivo?${x.exportada ? "" : " No se ha exportado: lo rellenado se pierde."}`, "Quitar")) { await DB.borrar(x.id); pintar(); } } }, "Quitar")));
     }
   });
@@ -211,7 +267,9 @@ function pintarInicio(main) {
 }
 
 /* ---------- hojas de campo de Drive (por la conexión del repositorio) ---------- */
-const CENTROS = { BAE: "Baena", BOG: "Bogarre", CAB: "Cabra", ESP: "Espejo", ETJ: "El Tejar", MAN: "Mancha Real", MAR: "Marchena", PAB: "Pedro Abad", PAL: "Palenciana" };
+const DATOS_EMPRESA = self.EMPRESA || {};   // empresa.js: lo escribe publicar.sh desde config/empresa.toml
+const CENTROS = DATOS_EMPRESA.centros || {};   // código → nombre; sin él, el código
+if (DATOS_EMPRESA.nombre_corto) document.title = `Hoja de campo · ${DATOS_EMPRESA.nombre_corto}`;
 const fechaES = iso => iso.split("-").reverse().join("/");
 let hojasD = null, centroD = null;
 function hojasDrive() {
@@ -242,8 +300,7 @@ async function traerHoja(x) {
   aviso("Trayendo la hoja de Drive…");
   try {
     const j = await REPO.pedir({ accion: "hoja", id: x.id });
-    const bin = atob(j.datos); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    await cargarBytes(j.nombre, bytes.buffer);
+    await cargarBytes(j.nombre, base64ABytes(j.datos), x.modificado);
   } catch (e) { aviso("No se pudo traer la hoja: " + e.message); }
 }
 
@@ -442,6 +499,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   await REPO.iniciar();
+  try { if (await abrirLaDeHoy()) return; } catch (e) { console.error(e); }
   try { const ultima = await DB.get("ultima"); if (ultima && await DB.leer(ultima)) { await abrirHoja(ultima); return; } } catch (e) { console.error(e); }
   E.vista = "inicio"; pintar();
 });

@@ -8,7 +8,7 @@ const MODELO = (() => {
   const ID_RE = /^[A-Z]{1,4}(-[A-Z0-9]+){1,3}$/;
   const TITULO_RE = /^(Qué se pidió|Qué se comprueba|Qué se estableció|Qué se pregunta|Pregunta|Aviso|Qué|Control|Área — responsable|Equipo y dónde está|Quién lo pide)$/;
   const OCULTAS = /^(Grupo|Por defecto|clave|Bloque)$/i;
-  const OPCIONAL = /^(Observaciones|Nota|Notas|Pedir por correo|Enviar|Enviar al responsable|José Carlos en copia|Foto o nota|Evidencia vista|Tipo de evidencia|Lo que dice el responsable|Nueva fecha propuesta|Otra medida que propone|Decisión|Notas de la entrevista)/i;
+  const OPCIONAL = /^(Observaciones|Nota|Notas|Pedir por correo|Enviar|Enviar al responsable|.+ en copia|Foto o nota|Evidencia vista|Tipo de evidencia|Lo que dice el responsable|Nueva fecha propuesta|Otra medida que propone|Decisión|Notas de la entrevista)/i;
   const mayusculas = t => { const l = t.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, "").slice(0, 8); return l.length >= 5 && l === l.toUpperCase(); };
 
   function hoja(sh, nombres) {

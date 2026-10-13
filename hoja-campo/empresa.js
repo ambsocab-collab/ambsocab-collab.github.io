@@ -1,0 +1,1 @@
+self.EMPRESA = {"nombre_corto": "El Tejar", "centros": {"BAE": "Baena", "BOG": "Bogarre", "CAB": "Cabra", "ESP": "Espejo", "ETJ": "El Tejar", "MAN": "Mancha Real", "MAR": "Marchena", "PAB": "Pedro Abad", "PAL": "Palenciana"}};
