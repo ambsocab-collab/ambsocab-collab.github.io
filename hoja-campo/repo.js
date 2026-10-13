@@ -67,16 +67,20 @@ const REPO = (() => {
   }
   function panelConexion() {
     const v = borrador || conexion || {};
-    const url = h("input", { type: "url", id: "con-url", placeholder: "https://script.google.com/macros/s/…/exec", value: v.url || "" });
-    const clave = h("input", { type: "password", id: "con-clave", placeholder: "Clave de lectura", value: v.clave || "" });
+    // en un formulario con «usuario» (la dirección) y «contraseña» (la clave): así el gestor de contraseñas de Chrome
+    // guarda las dos y las rellena en los demás dispositivos de la misma cuenta de Google
+    const url = h("input", { type: "url", id: "con-url", name: "username", autocomplete: "username", placeholder: "https://script.google.com/macros/s/…/exec", value: v.url || "" });
+    const clave = h("input", { type: "password", id: "con-clave", name: "password", autocomplete: "current-password", placeholder: "Clave de lectura", value: v.clave || "" });
     const abierto = !conexion || fallo; fallo = false;
-    return h("details", { class: "panel conexion", open: abierto },
-      h("summary", {}, conexion ? "Conectado con Drive · se actualiza solo" : "Conectar con Drive para que se actualice solo"),
-      h("p", { class: "nota" }, "Pega la dirección de la aplicación web del sistema y la clave de lectura. Se guardan solo en este dispositivo."),
+    const form = h("form", { class: "conexion-form", action: "#", method: "post", onsubmit: e => { e.preventDefault(); conectar(url.value, clave.value); } },
       h("label", { for: "con-url" }, "Dirección"), url, h("label", { for: "con-clave" }, "Clave de lectura"), clave,
       h("div", { class: "acciones" },
         conexion ? h("button", { type: "button", class: "btn", onclick: async () => { conexion = null; await DB.set("conexion", null); pintar(); } }, "Desconectar") : null,
-        h("button", { type: "button", class: "btn primario", onclick: () => conectar(url.value, clave.value) }, conexion ? "Guardar y actualizar" : "Conectar")));
+        h("button", { type: "submit", class: "btn primario" }, conexion ? "Guardar y actualizar" : "Conectar")));
+    return h("details", { class: "panel conexion", open: abierto },
+      h("summary", {}, conexion ? "Conectado con Drive · se actualiza solo" : "Conectar con Drive para que se actualice solo"),
+      h("p", { class: "nota" }, "Pega la dirección de la aplicación web del sistema y la clave de lectura, o deja que Chrome las rellene si ya las guardaste. Se guardan en este dispositivo."),
+      form);
   }
 
   async function cargar(file) {
