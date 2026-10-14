@@ -44,10 +44,12 @@ let guardarT = null;
 function poner(hoja, f, v) {
   (E.hoja.edits[hoja] ||= {});
   if (v === f.v) delete E.hoja.edits[hoja][f.ref]; else E.hoja.edits[hoja][f.ref] = v;
+  ((E.hoja.pendiente ||= {})[hoja] ||= {})[f.ref] = v;   // lo que falta escribir en la hoja de Google
   E.hoja.actualizada = Date.now();
+  programarGuardado();
   clearTimeout(guardarT);
   guardarT = setTimeout(async () => {
-    try { await DB.guardar(E.hoja); $("#guardado").textContent = "Guardado " + new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }); }
+    try { await DB.guardar(E.hoja); estadoGuardado(); }
     catch (e) { $("#guardado").textContent = "No se pudo guardar en el dispositivo"; }
   }, 250);
 }
@@ -97,14 +99,14 @@ async function cargarArchivo(file) {
 }
 /* guarda una hoja de Drive en el dispositivo sin abrirla (la de hoy o la próxima, para tenerla sin cobertura);
    nunca pisa una que ya tenga casillas rellenadas */
-async function guardarSinAbrir(nombre, bytes, modificado) {
+async function guardarSinAbrir(nombre, bytes, modificado, driveId) {
   const id = nombre.replace(/\.xlsx$/i, "");
   const previa = await DB.leer(id);
   if (previa && Object.keys(previa.edits || {}).some(k => Object.keys(previa.edits[k] || {}).length)) return false;
   const libro = await XL.read(bytes);
   const hoy = libro.sheets.find(s => s.name === "Hoy"); if (!hoy) return false;
   await DB.guardar({ id, nombre, titulo: (hoy.cells.get("A1") || {}).v || nombre, bytes, edits: {}, cargada: Date.now(),
-    actualizada: Date.now(), drive: modificado || null, precargada: true });
+    actualizada: Date.now(), drive: modificado || null, driveId: driveId || null, precargada: true });
   return true;
 }
 const RE_NOMBRE = /^([A-Z]{3}) (\d{2})(\d{2})(\d{4}) - Hoja de campo/;
@@ -128,7 +130,7 @@ async function sincronizarDrive() {
     if (local && local.drive && local.drive >= x.modificado) continue;   // ya está la última versión
     if (local && !local.drive && !local.precargada) continue;            // cargada a mano: no se toca
     if (local && Object.values(local.edits || {}).some(o => Object.keys(o || {}).length)) continue;  // ya rellenada aquí
-    try { const r = await REPO.pedir({ accion: "hoja", id: x.id }); if (await guardarSinAbrir(/\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", base64ABytes(r.datos), x.modificado)) traidas.push(x); }
+    try { const r = await REPO.pedir({ accion: "hoja", id: x.id }); if (await guardarSinAbrir(/\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", base64ABytes(r.datos), x.modificado, x.id)) traidas.push(x); }
     catch (e) { console.error(e); }
   }
   return traidas;
@@ -151,7 +153,7 @@ async function abrirLaDeHoy() {
   return false;
 }
 
-async function cargarBytes(nombre, bytes, drive) {
+async function cargarBytes(nombre, bytes, drive, driveId) {
   const file = { name: nombre };
   try {
     const libro = await XL.read(bytes);
@@ -160,7 +162,7 @@ async function cargarBytes(nombre, bytes, drive) {
     const titulo = (hoy.cells.get("A1") || {}).v || file.name;
     const id = file.name.replace(/\.xlsx$/i, "");
     const previa = await DB.leer(id);
-    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now(), drive: drive || null };
+    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now(), drive: drive || null, driveId: driveId || null };
     if (previa && Object.keys(previa.edits || {}).length) {
       if (!await confirmar(`Ya tienes «${previa.titulo}» con datos rellenados en este dispositivo. ¿Sustituirla por el archivo nuevo? Lo rellenado aquí y no exportado se pierde.`, "Sustituir")) return;
     }
@@ -177,35 +179,55 @@ async function abrirHoja(id) {
   await DB.set("ultima", id);
   pintar();
   precargarFotos();
+  if (nPendientes()) guardarEnDrive(false);
 }
 function marcarObligatorias() {  // las tareas bajo el rótulo rojo (retrasadas) se contestan siempre
   for (const p of E.modelo) for (const s of p.secciones) { let rojo = false;
     for (const e of s.entradas) { if (e.tipo === "rotulo") rojo = e.color === "rojo"; else if (e.tipo === "ficha") e.obligatoria = rojo; } }
 }
 
-/* ---------- exportar ---------- */
-async function generar() {
-  const fechas = {};
-  for (const p of E.modelo) for (const { it } of fichas(p)) for (const f of it.campos) if (f.fecha) (fechas[p.nombre] ||= new Set()).add(f.ref);
-  const blob = await XL.write(E.hoja.bytes, E.hoja.edits, fechas);
-  return new File([blob], E.hoja.nombre, { type: blob.type });
+/* ---------- guardar en la hoja de Google (sin exportar: 14-10-2026) ----------
+   Lo rellenado se guarda al momento en el dispositivo y, con conexión, se escribe en la hoja de Google de la visita
+   (acción guardar_hoja de la Apps Script): pocos segundos después de cada cambio, al volver la conexión, al salir de
+   la app y con el botón «Guardar». Sin conexión queda pendiente y se manda en cuanto la haya. */
+const nPendientes = () => Object.values((E.hoja && E.hoja.pendiente) || {}).reduce((a, o) => a + Object.keys(o || {}).length, 0);
+const horaCorta = t => new Date(t).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+function estadoGuardado(txt) {
+  const el = $("#guardado"); if (!el || !E.hoja) return;
+  const n = nPendientes();
+  el.textContent = txt || (!n ? (E.hoja.enDrive ? `Guardado en Drive ${horaCorta(E.hoja.enDrive)}` : "Guardado en este dispositivo")
+    : !REPO.conectado() ? `${n} cambios en este dispositivo · conecta la app con Drive para guardarlos en la hoja`
+    : navigator.onLine ? `${n} cambios sin guardar en Drive` : `Sin conexión · ${n} cambios se guardarán al volver`);
 }
-async function exportar() {
-  try {
-    const file = await generar();
-    const url = URL.createObjectURL(file);
-    const a = h("a", { href: url, download: file.name }); document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    E.hoja.exportada = Date.now(); await DB.guardar(E.hoja);
-    aviso(`Excel guardado en Descargas: ${file.name}. Súbelo a la carpeta de la visita en Drive.`);
-  } catch (e) { console.error(e); aviso("No se pudo generar el Excel."); }
+let guardadoT = null, guardando = false;
+function programarGuardado() { clearTimeout(guardadoT); guardadoT = setTimeout(() => guardarEnDrive(false), 6000); }
+async function idDrive(h) {   // la hoja de Google de esta hoja: la que se trajo, o la que se llama igual en Drive
+  if (h.driveId) return h.driveId;
+  const j = await REPO.pedir({ accion: "hojas" });
+  const x = (j.hojas || []).find(x => x.nombre === h.id);
+  if (x) { h.driveId = x.id; await DB.guardar(h); }
+  return h.driveId || null;
 }
-async function compartir() {
+async function guardarEnDrive(aMano) {
+  if (!E.hoja || guardando) return;
+  const n = nPendientes();
+  if (!n) { if (aMano) aviso("No hay cambios por guardar: la hoja de Google está al día."); estadoGuardado(); return; }
+  if (!REPO.conectado()) { if (aMano) aviso("Conecta la app con Drive (Repositorio PRL → Conectar con Drive) para guardar en la hoja de Google."); estadoGuardado(); return; }
+  if (!navigator.onLine) { if (aMano) aviso("Sin conexión: lo rellenado está a salvo en el dispositivo y se guardará en Drive al volver la conexión."); estadoGuardado(); return; }
+  guardando = true; estadoGuardado("Guardando en Drive…");
+  const h = E.hoja; const enviado = JSON.parse(JSON.stringify(h.pendiente));
   try {
-    const file = await generar();
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: E.hoja.titulo }); E.hoja.exportada = Date.now(); await DB.guardar(E.hoja); }
-    else exportar();
-  } catch (e) { if (e.name !== "AbortError") aviso("No se pudo compartir: " + e.message); }
+    const id = await idDrive(h);
+    if (!id) throw new Error("no encuentro en Drive una hoja de Google que se llame «" + h.id + "»");
+    const r = await REPO.pedir({ accion: "guardar_hoja", id, cambios: enviado });
+    for (const [p, o] of Object.entries(enviado)) for (const [ref, v] of Object.entries(o))   // fuera lo guardado, si no ha vuelto a cambiar
+      if (h.pendiente[p] && h.pendiente[p][ref] === v) delete h.pendiente[p][ref];
+    for (const p of Object.keys(h.pendiente)) if (!Object.keys(h.pendiente[p]).length) delete h.pendiente[p];
+    h.enDrive = Date.now(); await DB.guardar(h);
+    if (r.rechazadas && r.rechazadas.length) aviso(`Guardado en Drive, salvo ${r.rechazadas.length} casilla(s) que en la hoja de Google no son de rellenar.`);
+    else if (aMano) aviso(`Guardado en la hoja de Google (${r.guardadas} casillas).`);
+  } catch (e) { if (aMano) aviso("No se pudo guardar en Drive: " + e.message + ". Lo rellenado sigue en el dispositivo."); }
+  finally { guardando = false; estadoGuardado(); }
 }
 
 /* ---------- diálogo propio (sin confirm del navegador) ---------- */
@@ -226,7 +248,7 @@ function pintar() {
   const hayHoja = E.vista === "hoja" && E.modelo;
   $("#acciones-hoja").hidden = !hayHoja;
   $("#titulo").textContent = hayHoja ? E.hoja.titulo : E.vista === "repo" ? "Repositorio del sistema de PRL" : "Hoja de campo";
-  $("#guardado").textContent = hayHoja ? (E.hoja.exportada ? "Exportada " + new Date(E.hoja.exportada).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "Guardada en este dispositivo") : "";
+  $("#guardado").textContent = ""; if (hayHoja) estadoGuardado();
   const nav = $("#nav"); nav.innerHTML = ""; nav.hidden = !hayHoja;
   document.querySelector(".app").classList.toggle("sin-nav", !hayHoja);
   const main = $("#vista"); main.innerHTML = "";
@@ -258,7 +280,7 @@ function pintarInicio(main) {
     for (const x of hs.sort((a, b) => b.actualizada - a.actualizada)) {
       const n = Object.values(x.edits || {}).reduce((a, o) => a + Object.keys(o).length, 0);
       lista.append(h("div", { class: "fila-hoja" },
-        h("button", { type: "button", class: "abrir" + (fechaDe(x.id) === hoyISO() ? " destacada" : ""), onclick: () => abrirHoja(x.id) }, h("strong", {}, (fechaDe(x.id) === hoyISO() ? "Hoy · " : "") + x.titulo), h("span", {}, !n && x.precargada ? "descargada de Drive, lista para usar sin conexión" : `${n} casillas rellenadas · ${x.exportada ? "exportada " + new Date(x.exportada).toLocaleDateString("es-ES") : "sin exportar"}`)),
+        h("button", { type: "button", class: "abrir" + (fechaDe(x.id) === hoyISO() ? " destacada" : ""), onclick: () => abrirHoja(x.id) }, h("strong", {}, (fechaDe(x.id) === hoyISO() ? "Hoy · " : "") + x.titulo), h("span", {}, !n && x.precargada ? "descargada de Drive, lista para usar sin conexión" : `${n} casillas rellenadas · ${Object.values(x.pendiente || {}).some(o => Object.keys(o).length) ? "con cambios sin guardar en Drive" : x.enDrive ? "guardada en Drive " + new Date(x.enDrive).toLocaleDateString("es-ES") : "en este dispositivo"}`)),
         h("button", { type: "button", class: "btn", onclick: async () => { if (await confirmar(`¿Quitar «${x.titulo}» de este dispositivo?${x.exportada ? "" : " No se ha exportado: lo rellenado se pierde."}`, "Quitar")) { await DB.borrar(x.id); pintar(); } } }, "Quitar")));
     }
   });
@@ -300,7 +322,7 @@ async function traerHoja(x) {
   aviso("Trayendo la hoja de Drive…");
   try {
     const j = await REPO.pedir({ accion: "hoja", id: x.id });
-    await cargarBytes(j.nombre, base64ABytes(j.datos), x.modificado);
+    await cargarBytes(j.nombre, base64ABytes(j.datos), x.modificado, x.id);
   } catch (e) { aviso("No se pudo traer la hoja: " + e.message); }
 }
 
@@ -491,8 +513,10 @@ window.E = E;  // repo.js lo mira para repintar al llegar el índice
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); E.instalar = e; if (!E.modelo) pintar(); });
 document.addEventListener("DOMContentLoaded", async () => {
   $("#cargar").addEventListener("change", e => { cargarArchivo(e.target.files[0]); e.target.value = ""; });
-  $("#exportar").addEventListener("click", exportar);
-  $("#compartir").addEventListener("click", compartir);
+  $("#guardar").addEventListener("click", () => guardarEnDrive(true));
+  window.addEventListener("online", () => guardarEnDrive(false));
+  window.addEventListener("offline", () => estadoGuardado());
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") guardarEnDrive(false); });
   $("#hojas").addEventListener("click", () => { E.vista = "inicio"; E.modelo = null; pintar(); });
   $("#tab-hoja").addEventListener("click", () => { if (E.vista === "repo") { E.vista = E.modelo ? "hoja" : "inicio"; pintar(); } });
   $("#tab-repo").addEventListener("click", () => { E.vista = "repo"; pintar(); });
