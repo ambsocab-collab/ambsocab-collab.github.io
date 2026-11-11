@@ -116,9 +116,35 @@ const MODELO = (() => {
     return it;
   }
 
-  function libro(wb) {
-    const nombres = new Set(wb.sheets.filter(s => !s.hidden).map(s => s.name));
+  function libro(wb, otras) {
+    const nombres = new Set([...wb.sheets.filter(s => !s.hidden).map(s => s.name), ...(otras || [])]);
     return wb.sheets.filter(s => !s.hidden).map(s => hoja(s, nombres));
   }
-  return { libro };
+
+  /* Pestaña nativa del JSON (tramo 2, 12-11-2026): ya viene como secciones, rótulos y fichas (modelo_hoja.py); aquí solo se
+     completa lo que la app calcula (la casilla que decide si está contestada, los enlaces a otras pestañas). */
+  function nativa(p, nombres) {
+    let r = 0;
+    const out = { nombre: p.nombre, titulo: p.titulo || "", notas: p.notas || [], nativa: true, secciones: [] };
+    for (const s of p.secciones || []) {
+      const sec = { titulo: s.titulo || "", nota: s.nota || "", cabeceras: [], grupos: [], entradas: [] };
+      for (const e of s.entradas || []) {
+        if (e.tipo === "hueco") continue;
+        if (e.tipo !== "ficha") { sec.entradas.push({ ...e }); continue; }
+        const it = { tipo: "ficha", r: ++r, id: e.id || null, titulo: e.titulo || null, sub: e.sub || null, bloque: null,
+                     detalle: e.detalle || "", obligatoria: !!e.obligatoria, nativa: true, sinCabecera: false, plantilla: false,
+                     info: (e.info || []).map(i => ({ etiqueta: i.etiqueta, v: i.v, enlace: i.enlace || null, grupo: null,
+                                                      hoja: nombres.has(i.v) ? i.v : null, ayuda: i.ayuda || "" })),
+                     campos: (e.campos || []).map(f => ({ ref: f.ref, etiqueta: f.etiqueta, ayuda: f.ayuda || "", opts: f.opts || null,
+                                                          fecha: !!f.fecha, v: f.v == null ? "" : f.v, grupo: null })) };
+        const clave = it.campos.find(f => f.v === "" && !OPCIONAL.test(f.etiqueta));
+        it.claves = new Map(clave ? [["", clave.ref]] : []);
+        sec.entradas.push(it);
+      }
+      sec.conEntradas = sec.entradas.some(e => e.tipo === "ficha" && e.campos.length) || sec.entradas.some(e => e.tipo === "ficha");
+      out.secciones.push(sec);
+    }
+    return out;
+  }
+  return { libro, nativa };
 })();

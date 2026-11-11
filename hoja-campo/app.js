@@ -61,7 +61,7 @@ function contestada(hoja, it, g) {
   if (!v) return false;
   const comp = it.campos.find(x => x.etiqueta === "Comprobado" && (x.grupo || "") === (g || ""));
   const mot = it.campos.find(x => x.etiqueta === "Motivo del retraso" && (x.grupo || "") === (g || ""));
-  if (it.obligatoria && comp && mot && val(hoja, comp) !== "Hecha y eficaz" && !val(hoja, mot)) return false;
+  if (it.obligatoria && comp && mot && !["Hecha y eficaz", "No se pudo ver"].includes(val(hoja, comp)) && !val(hoja, mot)) return false;
   return true;
 }
 function fichas(p) { return p.secciones.flatMap(s => s.entradas.filter(e => e.tipo === "ficha").map(it => ({ s, it }))); }
@@ -96,7 +96,7 @@ function antesDeIrte() {
 async function cargarArchivo(file) {
   if (!file) return;
   if (/\.json$/i.test(file.name)) {   // la hoja de campo en JSON (12-11-2026)
-    try { const v = deVisita(JSON.parse(await file.text()), file.name); return cargarBytes(v.nombre, v.bytes, null, null, v.respuestas); }
+    try { const v = deVisita(JSON.parse(await file.text()), file.name); return cargarBytes(v.nombre, v.bytes, null, null, v); }
     catch (e) { console.error(e); aviso("Ese .json no es una hoja de campo."); return; }
   }
   return cargarBytes(file.name, await file.arrayBuffer());
@@ -106,23 +106,25 @@ async function cargarArchivo(file) {
    en sus casillas. Las hojas de Google de antes llegan como .xlsx. */
 function deVisita(v, nombre) {
   if (!v || !/^hoja-campo\//.test(v.formato || "") || !v.esqueleto) throw new Error("no es una hoja de campo en JSON");
-  return { nombre: (v.nombre || nombre.replace(/\.json$/i, "")) + ".json", bytes: base64ABytes(v.esqueleto), respuestas: v.respuestas || {} };
+  return { nombre: (v.nombre || nombre.replace(/\.json$/i, "")) + ".json", bytes: base64ABytes(v.esqueleto), respuestas: v.respuestas || {},
+           nativas: v.pestanas || [], orden: v.orden || [] };
 }
 function deDrive(r) {   // la respuesta de la acción «hoja»: .json o .xlsx
   if (r.formato === "json") return deVisita(JSON.parse(r.json), r.nombre);
-  return { nombre: /\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", bytes: base64ABytes(r.datos), respuestas: null };
+  return { nombre: /\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", bytes: base64ABytes(r.datos), respuestas: null, nativas: [], orden: [] };
 }
 const idDe = nombre => nombre.replace(/\.(xlsx|json)$/i, "");
+const extraVisita = v => ({ respuestas: (v && v.respuestas) || null, nativas: (v && v.nativas) || [], orden: (v && v.orden) || [] });
 /* guarda una hoja de Drive en el dispositivo sin abrirla (la de hoy o la próxima, para tenerla sin cobertura);
    nunca pisa una que ya tenga casillas rellenadas */
-async function guardarSinAbrir(nombre, bytes, modificado, driveId, respuestas) {
+async function guardarSinAbrir(nombre, bytes, modificado, driveId, v) {
   const id = idDe(nombre);
   const previa = await DB.leer(id);
   if (previa && Object.keys(previa.edits || {}).some(k => Object.keys(previa.edits[k] || {}).length)) return false;
   const libro = await XL.read(bytes);
   const hoy = libro.sheets.find(s => s.name === "Hoy"); if (!hoy) return false;
   await DB.guardar({ id, nombre, titulo: (hoy.cells.get("A1") || {}).v || nombre, bytes, edits: {}, cargada: Date.now(),
-    actualizada: Date.now(), drive: modificado || null, driveId: driveId || null, precargada: true, respuestas: respuestas || null });
+    actualizada: Date.now(), drive: modificado || null, driveId: driveId || null, precargada: true, ...extraVisita(v) });
   return true;
 }
 const RE_NOMBRE = /^([A-Z]{3}) (\d{2})(\d{2})(\d{4}) - Hoja de campo/;
@@ -146,7 +148,7 @@ async function sincronizarDrive() {
     if (local && local.drive && local.drive >= x.modificado) continue;   // ya está la última versión
     if (local && !local.drive && !local.precargada) continue;            // cargada a mano: no se toca
     if (local && Object.values(local.edits || {}).some(o => Object.keys(o || {}).length)) continue;  // ya rellenada aquí
-    try { const v = deDrive(await REPO.pedir({ accion: "hoja", id: x.id })); if (await guardarSinAbrir(v.nombre, v.bytes, x.modificado, x.id, v.respuestas)) traidas.push(x); }
+    try { const v = deDrive(await REPO.pedir({ accion: "hoja", id: x.id })); if (await guardarSinAbrir(v.nombre, v.bytes, x.modificado, x.id, v)) traidas.push(x); }
     catch (e) { console.error(e); }
   }
   return traidas;
@@ -169,7 +171,7 @@ async function abrirLaDeHoy() {
   return false;
 }
 
-async function cargarBytes(nombre, bytes, drive, driveId, respuestas) {
+async function cargarBytes(nombre, bytes, drive, driveId, v) {
   const file = { name: nombre };
   try {
     const libro = await XL.read(bytes);
@@ -178,7 +180,7 @@ async function cargarBytes(nombre, bytes, drive, driveId, respuestas) {
     const titulo = (hoy.cells.get("A1") || {}).v || file.name;
     const id = idDe(file.name);
     const previa = await DB.leer(id);
-    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now(), drive: drive || null, driveId: driveId || null, respuestas: respuestas || null };
+    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now(), drive: drive || null, driveId: driveId || null, ...extraVisita(v) };
     if (previa && Object.keys(previa.edits || {}).length) {
       if (!await confirmar(`Ya tienes «${previa.titulo}» con datos rellenados en este dispositivo. ¿Sustituirla por el archivo nuevo? Lo rellenado aquí y no exportado se pierde.`, "Sustituir")) return;
     }
@@ -189,7 +191,19 @@ async function cargarBytes(nombre, bytes, drive, driveId, respuestas) {
 }
 async function abrirHoja(id) {
   const hoja = await DB.leer(id); if (!hoja) return;
-  E.hoja = hoja; E.libro = await XL.read(hoja.bytes); E.modelo = MODELO.libro(E.libro);
+  E.hoja = hoja; E.libro = await XL.read(hoja.bytes);
+  const nativas = hoja.nativas || [];
+  E.modelo = MODELO.libro(E.libro, nativas.map(p => p.nombre));
+  if (nativas.length) {   // las pestañas nativas del JSON, cada una en su sitio (tramo 2, 12-11-2026)
+    const nombres = new Set([...E.modelo.map(p => p.nombre), ...nativas.map(p => p.nombre)]);
+    const orden = hoja.orden || [];
+    for (const p of nativas) {
+      const m = MODELO.nativa(p, nombres);
+      const antes = new Set(orden.slice(0, Math.max(0, orden.indexOf(p.nombre))));
+      const i = orden.includes(p.nombre) ? E.modelo.filter(x => antes.has(x.nombre)).length : E.modelo.length;
+      E.modelo.splice(i, 0, m);
+    }
+  }
   ponerRespuestas(hoja.respuestas);
   marcarObligatorias();
   E.sec = E.modelo[0].nombre; E.vista = "hoja"; E.grupo = {};
@@ -203,8 +217,8 @@ function ponerRespuestas(resp) {   // lo ya guardado en el .json de Drive, como 
   for (const p of E.modelo) { const r = resp[p.nombre]; if (!r) continue;
     for (const s of p.secciones) for (const e of s.entradas) if (e.tipo === "ficha") for (const f of e.campos) if (f.ref in r) f.v = r[f.ref]; }
 }
-function marcarObligatorias() {  // las tareas bajo el rótulo rojo (retrasadas) se contestan siempre
-  for (const p of E.modelo) for (const s of p.secciones) { let rojo = false;
+function marcarObligatorias() {  // las tareas bajo el rótulo rojo (retrasadas) se contestan siempre (las nativas ya lo traen)
+  for (const p of E.modelo.filter(p => !p.nativa)) for (const s of p.secciones) { let rojo = false;
     for (const e of s.entradas) { if (e.tipo === "rotulo") rojo = e.color === "rojo"; else if (e.tipo === "ficha") e.obligatoria = rojo; } }
 }
 
@@ -357,7 +371,7 @@ async function traerHoja(x) {
   aviso("Trayendo la hoja de Drive…");
   try {
     const v = deDrive(await REPO.pedir({ accion: "hoja", id: x.id }));
-    await cargarBytes(v.nombre, v.bytes, x.modificado, x.id, v.respuestas);
+    await cargarBytes(v.nombre, v.bytes, x.modificado, x.id, v);
   } catch (e) { aviso("No se pudo traer la hoja: " + e.message); }
 }
 
