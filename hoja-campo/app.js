@@ -60,7 +60,9 @@ function contestada(hoja, it, g) {
   const f = it.campos.find(x => x.ref === ref); const v = val(hoja, f);
   if (!v) return false;
   const comp = it.campos.find(x => x.etiqueta === "Comprobado" && (x.grupo || "") === (g || ""));
-  const mot = it.campos.find(x => x.etiqueta === "Motivo del retraso" && (x.grupo || "") === (g || ""));
+  // el porqué de una retrasada: «Motivo del retraso» o, en la ficha del 12-11-2026, las Observaciones
+  const mot = it.campos.find(x => x.etiqueta === "Motivo del retraso" && (x.grupo || "") === (g || "")) ||
+              (it.nativa ? it.campos.find(x => x.etiqueta === "Observaciones") : null);
   if (it.obligatoria && comp && mot && !["Hecha y eficaz", "No se pudo ver"].includes(val(hoja, comp)) && !val(hoja, mot)) return false;
   return true;
 }
@@ -514,8 +516,9 @@ function fichaTarea(p, it, card, datos, campos, est) {
   if (carpetas.length) lado.append(h("div", { class: "carpetas" }, carpetas.map(a => { a.className = "carpeta"; a.textContent = (/evidencia/i.test(a.textContent) ? "📁 Evidencia del responsable" : "📁 Mis fotos") + " ↗"; return a; })));
   if (it.detalle || seis.length) principal.append(h("details", { class: "mas" }, h("summary", {}, "Ver detalle"),
     it.detalle ? h("p", { class: "detalle" }, it.detalle) : null, ...seis.map(a => { a.className = "btn enlace-foto"; return a; })));
-  const principales = [], secundarios = [];
-  for (const f of campos) (OPC(f) && campos.length > 2 ? secundarios : principales).push(f);
+  // Todo a la vista (Bernardo, 12-11-2026): Comprobado, Observaciones, Nueva fecha propuesta y Propuesta, sin «Más campos»
+  const principales = it.nativa ? campos : [], secundarios = [];
+  if (!it.nativa) for (const f of campos) (OPC(f) && campos.length > 2 ? secundarios : principales).push(f);
   for (const f of principales) principal.append(campoUI(p, it, f));
   if (secundarios.length) {
     const id = p.nombre + "|" + it.r + "|mas";
@@ -526,7 +529,8 @@ function fichaTarea(p, it, card, datos, campos, est) {
   }
   if (est === false && it.obligatoria) {
     const comp = campos.find(f => f.etiqueta === "Comprobado");
-    principal.append(h("p", { class: "msg mal" }, comp && val(p.nombre, comp) ? "Falta el motivo del retraso." : "Retrasada: falta «Comprobado»."));
+    const sinMotivo = it.campos.some(f => f.etiqueta === "Motivo del retraso") ? "Falta el motivo del retraso." : "Faltan las observaciones: por qué no se ha hecho.";
+    principal.append(h("p", { class: "msg mal" }, comp && val(p.nombre, comp) ? sinMotivo : "Retrasada: falta «Comprobado»."));
   }
   card.append(principal);
   if (lado.children.length) card.append(lado);
@@ -604,7 +608,7 @@ function precargarFotos() {  // con conexión, deja las miniaturas de las tareas
 }
 
 const OPC = f => /^(Observaciones|Nota|Notas|Lo que dice el responsable|Nueva fecha propuesta|Otra medida|Otras medidas|Decisión|Tipo de evidencia|Evidencia vista|Foto o nota|Notas de la entrevista)/i.test(f.etiqueta);
-const OBLIG = f => /^(Comprobado|Motivo del retraso|Estado|Resultado|¿Recibido hoy\?)$/.test(f.etiqueta);
+const OBLIG = f => /^(Comprobado|Motivo del retraso|Estado|Resultado|¿Recibido hoy\?)$/.test(f.etiqueta) || (f.etiqueta === "Observaciones" && /\|Observaciones$/.test(f.ref || ""));
 
 function campoUI(p, it, f) {
   const id = "f_" + slug(p.nombre + f.ref);
@@ -643,7 +647,7 @@ function campoUI(p, it, f) {
   ta.addEventListener("input", () => { poner(p.nombre, f, ta.value); crecer(); });
   ta.addEventListener("change", pintarSuave);
   requestAnimationFrame(crecer);
-  return h("div", { class: "campo" }, etiqueta ? h("label", { for: id }, etiqueta) : null, ta, ayuda);
+  return h("div", { class: "campo" }, etiqueta ? h("label", { for: id }, etiqueta, marca) : null, ta, ayuda);
 }
 function pintarSuave() { const y = window.scrollY; const foco = document.activeElement && document.activeElement.id; pintar(); window.scrollTo({ top: y }); if (foco && document.getElementById(foco)) document.getElementById(foco).focus({ preventScroll: true }); }
 
