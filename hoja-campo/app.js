@@ -1,5 +1,5 @@
-/* Hoja de campo de la empresa: la app. Guarda en el dispositivo (IndexedDB) cada hoja cargada y lo rellenado; exporta
-   el mismo .xlsx con las respuestas escritas en sus casillas, para procesarlo como siempre (leer_hoja.py). */
+/* Hoja de campo de la empresa: la app. Guarda en el dispositivo (IndexedDB) cada hoja cargada y lo rellenado, y lo manda
+   a Drive (acción guardar_hoja): al .json de la visita (desde el 12-11-2026) o a la hoja de Google de antes. */
 "use strict";
 
 /* ---------- almacenamiento en el dispositivo ---------- */
@@ -95,18 +95,34 @@ function antesDeIrte() {
 /* ---------- carga ---------- */
 async function cargarArchivo(file) {
   if (!file) return;
+  if (/\.json$/i.test(file.name)) {   // la hoja de campo en JSON (12-11-2026)
+    try { const v = deVisita(JSON.parse(await file.text()), file.name); return cargarBytes(v.nombre, v.bytes, null, null, v.respuestas); }
+    catch (e) { console.error(e); aviso("Ese .json no es una hoja de campo."); return; }
+  }
   return cargarBytes(file.name, await file.arrayBuffer());
 }
+/* La hoja de campo en JSON (12-11-2026): {formato: "hoja-campo/1", esqueleto (el .xlsx de siempre, en base64), editables,
+   respuestas {pestaña: {A1: valor}}}. Se pinta el esqueleto como hasta ahora y lo ya guardado en Drive (respuestas) se pone
+   en sus casillas. Las hojas de Google de antes llegan como .xlsx. */
+function deVisita(v, nombre) {
+  if (!v || !/^hoja-campo\//.test(v.formato || "") || !v.esqueleto) throw new Error("no es una hoja de campo en JSON");
+  return { nombre: (v.nombre || nombre.replace(/\.json$/i, "")) + ".json", bytes: base64ABytes(v.esqueleto), respuestas: v.respuestas || {} };
+}
+function deDrive(r) {   // la respuesta de la acción «hoja»: .json o .xlsx
+  if (r.formato === "json") return deVisita(JSON.parse(r.json), r.nombre);
+  return { nombre: /\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", bytes: base64ABytes(r.datos), respuestas: null };
+}
+const idDe = nombre => nombre.replace(/\.(xlsx|json)$/i, "");
 /* guarda una hoja de Drive en el dispositivo sin abrirla (la de hoy o la próxima, para tenerla sin cobertura);
    nunca pisa una que ya tenga casillas rellenadas */
-async function guardarSinAbrir(nombre, bytes, modificado, driveId) {
-  const id = nombre.replace(/\.xlsx$/i, "");
+async function guardarSinAbrir(nombre, bytes, modificado, driveId, respuestas) {
+  const id = idDe(nombre);
   const previa = await DB.leer(id);
   if (previa && Object.keys(previa.edits || {}).some(k => Object.keys(previa.edits[k] || {}).length)) return false;
   const libro = await XL.read(bytes);
   const hoy = libro.sheets.find(s => s.name === "Hoy"); if (!hoy) return false;
   await DB.guardar({ id, nombre, titulo: (hoy.cells.get("A1") || {}).v || nombre, bytes, edits: {}, cargada: Date.now(),
-    actualizada: Date.now(), drive: modificado || null, driveId: driveId || null, precargada: true });
+    actualizada: Date.now(), drive: modificado || null, driveId: driveId || null, precargada: true, respuestas: respuestas || null });
   return true;
 }
 const RE_NOMBRE = /^([A-Z]{3}) (\d{2})(\d{2})(\d{4}) - Hoja de campo/;
@@ -130,7 +146,7 @@ async function sincronizarDrive() {
     if (local && local.drive && local.drive >= x.modificado) continue;   // ya está la última versión
     if (local && !local.drive && !local.precargada) continue;            // cargada a mano: no se toca
     if (local && Object.values(local.edits || {}).some(o => Object.keys(o || {}).length)) continue;  // ya rellenada aquí
-    try { const r = await REPO.pedir({ accion: "hoja", id: x.id }); if (await guardarSinAbrir(/\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", base64ABytes(r.datos), x.modificado, x.id)) traidas.push(x); }
+    try { const v = deDrive(await REPO.pedir({ accion: "hoja", id: x.id })); if (await guardarSinAbrir(v.nombre, v.bytes, x.modificado, x.id, v.respuestas)) traidas.push(x); }
     catch (e) { console.error(e); }
   }
   return traidas;
@@ -153,33 +169,39 @@ async function abrirLaDeHoy() {
   return false;
 }
 
-async function cargarBytes(nombre, bytes, drive, driveId) {
+async function cargarBytes(nombre, bytes, drive, driveId, respuestas) {
   const file = { name: nombre };
   try {
     const libro = await XL.read(bytes);
     if (!libro.sheets.some(s => s.name === "Hoy")) { aviso("Este Excel no es una hoja de campo: no tiene la pestaña «Hoy»."); return; }
     const hoy = libro.sheets.find(s => s.name === "Hoy");
     const titulo = (hoy.cells.get("A1") || {}).v || file.name;
-    const id = file.name.replace(/\.xlsx$/i, "");
+    const id = idDe(file.name);
     const previa = await DB.leer(id);
-    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now(), drive: drive || null, driveId: driveId || null };
+    const hoja = { id, nombre: file.name, titulo, bytes, edits: {}, cargada: Date.now(), actualizada: Date.now(), drive: drive || null, driveId: driveId || null, respuestas: respuestas || null };
     if (previa && Object.keys(previa.edits || {}).length) {
       if (!await confirmar(`Ya tienes «${previa.titulo}» con datos rellenados en este dispositivo. ¿Sustituirla por el archivo nuevo? Lo rellenado aquí y no exportado se pierde.`, "Sustituir")) return;
     }
     await DB.guardar(hoja);
     await abrirHoja(id);
     aviso("Hoja cargada: " + titulo);
-  } catch (e) { console.error(e); aviso("No se pudo leer el archivo. Tiene que ser la hoja de campo en .xlsx."); }
+  } catch (e) { console.error(e); aviso("No se pudo leer el archivo. Tiene que ser la hoja de campo (.json o .xlsx)."); }
 }
 async function abrirHoja(id) {
   const hoja = await DB.leer(id); if (!hoja) return;
   E.hoja = hoja; E.libro = await XL.read(hoja.bytes); E.modelo = MODELO.libro(E.libro);
+  ponerRespuestas(hoja.respuestas);
   marcarObligatorias();
   E.sec = E.modelo[0].nombre; E.vista = "hoja"; E.grupo = {};
   await DB.set("ultima", id);
   pintar();
   precargarFotos();
   if (nPendientes()) guardarEnDrive(false);
+}
+function ponerRespuestas(resp) {   // lo ya guardado en el .json de Drive, como valor de partida de cada casilla
+  if (!resp) return;
+  for (const p of E.modelo) { const r = resp[p.nombre]; if (!r) continue;
+    for (const s of p.secciones) for (const e of s.entradas) if (e.tipo === "ficha") for (const f of e.campos) if (f.ref in r) f.v = r[f.ref]; }
 }
 function marcarObligatorias() {  // las tareas bajo el rótulo rojo (retrasadas) se contestan siempre
   for (const p of E.modelo) for (const s of p.secciones) { let rojo = false;
@@ -220,6 +242,9 @@ async function guardarEnDrive(aMano) {
     const id = await idDrive(h);
     if (!id) throw new Error("no encuentro en Drive una hoja de Google que se llame «" + h.id + "»");
     const r = await REPO.pedir({ accion: "guardar_hoja", id, cambios: enviado });
+    // Solo cuenta como guardado si la Apps Script dice cuántas casillas escribió: una versión publicada antigua, sin
+    // «guardar_hoja», contestaba otra cosa y lo pendiente se daba por guardado sin estarlo (03-11-2026).
+    if (typeof r.guardadas !== "number") throw new Error("la aplicación de Apps Script publicada no sabe guardar la hoja (hay que publicar la versión nueva)");
     for (const [p, o] of Object.entries(enviado)) for (const [ref, v] of Object.entries(o))   // fuera lo guardado, si no ha vuelto a cambiar
       if (h.pendiente[p] && h.pendiente[p][ref] === v) delete h.pendiente[p][ref];
     for (const p of Object.keys(h.pendiente)) if (!Object.keys(h.pendiente[p]).length) delete h.pendiente[p];
@@ -228,6 +253,16 @@ async function guardarEnDrive(aMano) {
     else if (aMano) aviso(`Guardado en la hoja de Google (${r.guardadas} casillas).`);
   } catch (e) { if (aMano) aviso("No se pudo guardar en Drive: " + e.message + ". Lo rellenado sigue en el dispositivo."); }
   finally { guardando = false; estadoGuardado(); }
+}
+
+/* ✕ junto a «Guardar» (Bernardo, 03-11-2026): cerrar siempre guarda antes (en el dispositivo y, con conexión, en la hoja
+   de Google) y vuelve a la lista de hojas. Lo que no se pueda mandar a Drive queda pendiente, como siempre. */
+async function cerrarHoja() {
+  if (!E.hoja) return;
+  clearTimeout(guardarT); clearTimeout(guardadoT);
+  try { await DB.guardar(E.hoja); } catch (e) { console.error(e); }
+  await guardarEnDrive(true);
+  E.vista = "inicio"; E.modelo = null; pintar();
 }
 
 /* ---------- diálogo propio (sin confirm del navegador) ---------- */
@@ -269,10 +304,10 @@ function pintar() {
 function pintarInicio(main) {
   const s = h("section", { class: "vista" });
   if (REPO.conectado()) s.append(hojasDrive());
-  s.append(REPO.conectado() ? h("div", { class: "panel" }, h("p", { class: "nota" }, "¿La hoja no está en Drive? Cárgala desde un archivo .xlsx."), h("label", { class: "btn", for: "cargar" }, "Cargar desde archivo")) : h("div", { class: "panel bienvenida" },
+  s.append(REPO.conectado() ? h("div", { class: "panel" }, h("p", { class: "nota" }, "¿La hoja no está en Drive? Cárgala desde un archivo (.json o .xlsx)."), h("label", { class: "btn", for: "cargar" }, "Cargar desde archivo")) : h("div", { class: "panel bienvenida" },
     h("h2", {}, "Carga la hoja de campo de la visita"),
     h("p", {}, "En Drive, abre la hoja de campo de la visita y descárgala como Excel (Archivo → Descargar → Microsoft Excel). Después cárgala aquí. Todo lo que rellenes se queda en este dispositivo hasta que lo exportes."),
-    h("label", { class: "btn primario grande", for: "cargar" }, "Cargar hoja de campo (.xlsx)")));
+    h("label", { class: "btn primario grande", for: "cargar" }, "Cargar hoja de campo (.json o .xlsx)")));
   const lista = h("div", { class: "lista-hojas" });
   s.append(h("h3", {}, "Hojas en este dispositivo"), lista);
   DB.lista().then(hs => {
@@ -321,17 +356,26 @@ function hojasDrive() {
 async function traerHoja(x) {
   aviso("Trayendo la hoja de Drive…");
   try {
-    const j = await REPO.pedir({ accion: "hoja", id: x.id });
-    await cargarBytes(j.nombre, base64ABytes(j.datos), x.modificado, x.id);
+    const v = deDrive(await REPO.pedir({ accion: "hoja", id: x.id }));
+    await cargarBytes(v.nombre, v.bytes, x.modificado, x.id, v.respuestas);
   } catch (e) { aviso("No se pudo traer la hoja: " + e.message); }
 }
 
+// En «Hoy», las líneas sueltas son el texto del Coordinador (desde el 03-11-2026 «Hoy» es solo ese texto): se ven, no
+// se pliegan como instrucciones. Solo el subtítulo fijo de la pestaña es instrucción (11-11-2026).
+const SUBTITULO_HOY = /Aquí no se rellena nada/;
 function pintarHoja(p) {
   const s = h("section", { class: "vista" });
+  const esHoy = p.nombre === "Hoy";
+  const resumen = esHoy ? p.notas.filter(n => !SUBTITULO_HOY.test(n)) : [];
+  const instrucciones = p.notas.filter(n => !/^⚠/.test(n) && !resumen.includes(n));
   s.append(h("div", { class: "cabecera-hoja" }, h("h2", {}, p.titulo || p.nombre),
-    p.notas.filter(n => /^⚠/.test(n)).map(n => h("p", { class: "nota alerta" }, n)),
-    p.notas.some(n => !/^⚠/.test(n)) ? h("details", { class: "mas" }, h("summary", {}, "Cómo se rellena esta pestaña"), p.notas.filter(n => !/^⚠/.test(n)).map(n => h("p", { class: "nota" }, n))) : null));
-  if (p.nombre === "Hoy") {
+    p.notas.filter(n => /^⚠/.test(n) && !resumen.includes(n)).map(n => h("p", { class: "nota alerta" }, n)),
+    instrucciones.length ? h("details", { class: "mas" }, h("summary", {}, "Cómo se rellena esta pestaña"), instrucciones.map(n => h("p", { class: "nota" }, n))) : null));
+  if (resumen.length)
+    s.append(h("div", { class: "panel" }, h("h3", {}, "Lo que toca hoy"),
+      resumen.map((n, i) => h("p", { class: /^⚠|^Aviso:/.test(n) ? "nota alerta" : "" }, i === 0 ? h("strong", {}, n) : n))));
+  if (esHoy) {
     const lista = h("ul", { class: "checklist" });
     for (const x of antesDeIrte()) lista.append(h("li", {}, h("span", { class: "marca " + (x.ok ? "ok" : "mal") }, x.ok ? "✓" : "!"),
       h("button", { type: "button", class: "enlace", onclick: () => { E.sec = x.hoja; pintar(); } }, x.texto)));
@@ -341,10 +385,11 @@ function pintarHoja(p) {
   return s;
 }
 
+const PLEGABLES = new Set(["verde", "rojo", "gris", "azul"]);   // rótulos de grupo (no los de área)
 function pintarSeccion(p, sec) {
   const wrap = h("div", { class: "seccion" });
   if (sec.titulo && !(p.nombre === "Hoy" && /ANTES DE IRTE/.test(sec.titulo) && !sec.entradas.some(e => e.tipo === "ficha" && e.campos.length)))
-    wrap.append(h("h3", { class: "tit-seccion" }, sec.titulo), sec.nota ? h("p", { class: "nota" }, sec.nota) : null);
+    wrap.append(...[h("h3", { class: "tit-seccion" }, sec.titulo), sec.nota ? h("p", { class: "nota" }, sec.nota) : null].filter(Boolean));   // append(null) pinta «null»
   if (!sec.conEntradas) { wrap.append(tabla(sec)); return wrap; }
   const clave = p.nombre + "|" + sec.titulo;
   const grupos = sec.grupos.filter(g => g.conDatos || true);
@@ -353,16 +398,28 @@ function pintarSeccion(p, sec) {
     g = E.grupo[clave] || grupos[0].id;
     wrap.append(h("div", { class: "seg", role: "tablist" }, grupos.map(x => h("button", { type: "button", role: "tab", "aria-selected": String(x.id === g), onclick: () => { E.grupo[clave] = x.id; pintar(); } }, x.texto))));
   }
-  let bloque = null, cuerpo = wrap, plantillas = 0;
+  let bloque = null, cuerpo = wrap, plantillas = 0, contenedor = wrap, encima = "";
   for (const e of sec.entradas) {
-    if (e.tipo === "rotulo") { bloque = null; cuerpo = wrap; wrap.append(h("div", { class: "rotulo " + e.color }, e.texto)); continue; }
+    if (e.tipo === "rotulo") {
+      bloque = null;
+      if (PLEGABLES.has(e.color)) {   // los grupos de tareas salen plegados y se abren tocando el título (03-11-2026)
+        const id = p.nombre + "|R|" + encima + "|" + e.texto.replace(/\s*\(.*$/, "");   // el mismo subgrupo sale en mis tareas y en heredadas
+        const det = h("details", { class: "plegable", open: E.abiertos.has(id) }, h("summary", { class: "rotulo " + e.color }, e.texto));
+        det.addEventListener("toggle", () => det.open ? E.abiertos.add(id) : E.abiertos.delete(id));
+        contenedor = h("div", { class: "cuerpo" }); det.append(contenedor); wrap.append(det);
+      } else {
+        encima = e.color === "seccion" ? encima.split("»")[0] + "»" + e.texto : e.texto;   // área » sección
+        contenedor = wrap; wrap.append(h("div", { class: "rotulo " + e.color }, e.texto));
+      }
+      cuerpo = contenedor; continue;
+    }
     if (e.tipo === "nota") { cuerpo.append(h("p", { class: "nota" }, e.texto)); continue; }
     if (e.bloque !== null && e.bloque !== undefined && e.bloque !== (bloque && bloque.nombre)) {
       const id = p.nombre + "|" + e.bloque;
       const det = h("details", { class: "bloque", open: E.abiertos.has(id) }, h("summary", {}, e.bloque, h("span", { class: "cnt" }, "")));
       det.addEventListener("toggle", () => det.open ? E.abiertos.add(id) : E.abiertos.delete(id));
       bloque = { nombre: e.bloque, det, cuerpo: h("div", { class: "cuerpo" }), hechas: 0, total: 0 };
-      det.append(bloque.cuerpo); wrap.append(det); cuerpo = bloque.cuerpo;
+      det.append(bloque.cuerpo); contenedor.append(det); cuerpo = bloque.cuerpo;
     }
     if (e.plantilla && !e.campos.some(f => val(p.nombre, f))) {
       if (plantillas++ > 0) continue;
@@ -392,20 +449,23 @@ function fichaUI(p, sec, it, g) {
   const est = contestada(p.nombre, it, g || "");
   // dato de solo lectura dentro de un bloque: una línea, sin tarjeta
   if (!campos.length && it.bloque) return h("div", { class: "dato" }, h("span", { class: "k" }, it.titulo || ""), h("span", { class: "v" }, info.map(i => i.v).join(" · ")));
-  const card = h("article", { class: "ficha" + (est === true ? " est-ok" : est === false && it.obligatoria ? " est-mal" : est === false ? " est-pend" : "") });
+  const esTarea = /^CTL-TAR/.test(p.nombre) && it.id && /^T-[A-Z]{3}-\d{4}$/.test(it.id);
+  if (esTarea && !campos.length) return historica(it);   // «Históricas» (11-11-2026): una línea con sus enlaces
+  const card = h("article", { class: "ficha" + (esTarea ? " tarea" : "") + (est === true ? " est-ok" : est === false && it.obligatoria ? " est-mal" : est === false ? " est-pend" : "") });
   const cab = h("div", { class: "ficha-cab" });
   if (it.id) cab.append(h("span", { class: "id" }, it.id));
   if (it.sub) cab.append(h("strong", {}, it.sub));
   if (it.obligatoria) cab.append(h("span", { class: "pastilla mal" }, est ? "Retrasada · contestada" : "Retrasada"));
   if (cab.children.length) card.append(cab);
-  if (it.titulo) card.append(h("p", { class: "ficha-titulo" }, it.titulo));
+  if (it.titulo && !["Encargos", "Entrevistas"].includes(p.nombre)) card.append(h("p", { class: "ficha-titulo" }, it.titulo));   // en «Encargos», el título va en la cabecera plegable
   const datos = h("div", { class: "datos" });
   for (const i of info) {
-    if (i.enlace) { datos.append(h("a", { class: "btn enlace-foto", href: i.enlace, target: "_blank", rel: "noopener" }, "📷 ", i.v || i.etiqueta, " ↗")); continue; }
+    if (i.enlace) { datos.append(h("a", { class: "btn enlace-foto", href: i.enlace, target: "_blank", rel: "noopener" }, /^\p{Extended_Pictographic}/u.test(i.v || "") ? "" : "📷 ", i.v || i.etiqueta, " ↗")); continue; }   // los que ya traen su icono (📁), sin la cámara
     if (i.hoja) { const pp = E.modelo.find(x => x.nombre === i.hoja); const a = avance(pp); datos.append(h("button", { type: "button", class: "btn ir", onclick: () => { E.sec = i.hoja; pintar(); window.scrollTo({ top: 0 }); } }, `Abrir ${i.hoja.split(" · ").pop()}`, a.total ? ` · ${a.hechas}/${a.total}` : "")); continue; }
     const vence = /^Vence/.test(i.etiqueta);
     datos.append(h("span", { class: "dato-chip" + (vence && /hace/.test(i.v) ? " mal" : "") }, i.etiqueta ? h("span", { class: "k" }, i.etiqueta + ": ") : null, i.v));
   }
+  if (esTarea) return fichaTarea(p, it, card, datos, campos, est);
   if (datos.children.length) card.append(datos);
   if (it.detalle) card.append(h("details", { class: "mas" }, h("summary", {}, "Ver detalle"), h("p", { class: "detalle" }, it.detalle)));
   if (it.id && /^T-[A-Z]{3}-\d{4}$/.test(it.id)) { const g = galeria(it.id); if (g) card.append(g); }
@@ -423,7 +483,73 @@ function fichaUI(p, sec, it, g) {
     const comp = campos.find(f => f.etiqueta === "Comprobado");
     card.append(h("p", { class: "msg mal" }, comp && val(p.nombre, comp) ? "Falta el motivo del retraso." : "Retrasada: falta «Comprobado»."));
   }
+  return p.nombre === "Encargos" ? plegableEncargo(p, it, card, campos) : p.nombre === "Entrevistas" ? plegableEntrevista(p, it, card) : card;
+}
+// Tarjeta de una tarea (Bernardo, 11-11-2026): a la izquierda, el código, la referencia, lo que se pidió y lo que se rellena;
+// a la derecha (en el móvil, debajo), los datos en pequeño, las fotos (se amplían al tocarlas) y las carpetas. «Ver detalle»:
+// el origen, quién y cuándo, el estado y el enlace a 6conecta.
+function fichaTarea(p, it, card, datos, campos, est) {
+  const principal = h("div", { class: "tarea-main" }), lado = h("aside", { class: "tarea-lado" });
+  while (card.firstChild) principal.append(card.firstChild);
+  const enlaces = [...datos.querySelectorAll("a.enlace-foto")], seis = enlaces.filter(a => /6conecta/i.test(a.textContent));
+  const carpetas = enlaces.filter(a => !seis.includes(a));
+  for (const a of enlaces) a.remove();
+  if (datos.children.length) { datos.classList.add("datos-lado"); lado.append(datos); }
+  const g = galeria(it.id);
+  if (g) lado.append(g);
+  if (carpetas.length) lado.append(h("div", { class: "carpetas" }, carpetas.map(a => { a.className = "carpeta"; a.textContent = (/evidencia/i.test(a.textContent) ? "📁 Evidencia del responsable" : "📁 Mis fotos") + " ↗"; return a; })));
+  if (it.detalle || seis.length) principal.append(h("details", { class: "mas" }, h("summary", {}, "Ver detalle"),
+    it.detalle ? h("p", { class: "detalle" }, it.detalle) : null, ...seis.map(a => { a.className = "btn enlace-foto"; return a; })));
+  const principales = [], secundarios = [];
+  for (const f of campos) (OPC(f) && campos.length > 2 ? secundarios : principales).push(f);
+  for (const f of principales) principal.append(campoUI(p, it, f));
+  if (secundarios.length) {
+    const id = p.nombre + "|" + it.r + "|mas";
+    const relleno = secundarios.filter(f => val(p.nombre, f) && val(p.nombre, f) !== f.v).length;
+    const d = h("details", { class: "mas", open: E.abiertos.has(id) }, h("summary", {}, `Más campos (${secundarios.length})${relleno ? ` · ${relleno} rellenados` : ""}`), h("div", { class: "cuerpo" }, secundarios.map(f => campoUI(p, it, f))));
+    d.addEventListener("toggle", () => d.open ? E.abiertos.add(id) : E.abiertos.delete(id));
+    principal.append(d);
+  }
+  if (est === false && it.obligatoria) {
+    const comp = campos.find(f => f.etiqueta === "Comprobado");
+    principal.append(h("p", { class: "msg mal" }, comp && val(p.nombre, comp) ? "Falta el motivo del retraso." : "Retrasada: falta «Comprobado»."));
+  }
+  card.append(principal);
+  if (lado.children.length) card.append(lado);
   return card;
+}
+function historica(it) {
+  const enl = it.info.filter(i => i.enlace).map(i => h("a", { class: "carpeta", href: i.enlace, target: "_blank", rel: "noopener" }, /6conecta/i.test(i.v) ? "🔗 6conecta ↗" : /evidencia/i.test(i.v) ? "📁 Evidencia ↗" : "📁 Fotos ↗"));
+  return h("div", { class: "historica" }, h("span", { class: "id" }, it.id), h("span", { class: "h-tit" }, [it.sub, it.titulo].filter(Boolean).join(" — ")), h("span", { class: "h-enl" }, enl));
+}
+// «Encargos» (criterio del técnico, 11-11-2026): cada encargo se pliega y se despliega tocándolo; cerrado se ve el título,
+// el origen y el estado. «Ya no aplica» lo tacha y lo deja plegado (se puede deshacer).
+// «Entrevistas» (11-11-2026): el guion de cada responsable, plegable; cerrado, su nombre y cuántos temas tiene.
+function plegableEntrevista(p, it, card) {
+  const temas = it.info.filter(i => i.hoja).length;
+  const quien = it.titulo || (it.info.find(i => /responsable/i.test(i.etiqueta || "")) || {}).v || "Responsable";
+  const id = p.nombre + "|ent|" + it.r;
+  const det = h("details", { class: "encargo", open: E.abiertos.has(id) },
+    h("summary", {}, h("span", { class: "enc-tit" }, quien),
+      h("span", { class: "pastilla " + (temas ? "pend" : "gris") }, temas ? `${temas} tema${temas > 1 ? "s" : ""}` : "Nada que tratar")),
+    card);
+  det.addEventListener("toggle", () => det.open ? E.abiertos.add(id) : E.abiertos.delete(id));
+  return det;
+}
+function plegableEncargo(p, it, card, campos) {
+  const fEstado = campos.find(f => f.etiqueta === "Estado");
+  const estado = fEstado ? val(p.nombre, fEstado) : "";
+  const origen = (it.info.find(i => i.etiqueta === "Origen") || {}).v || "";
+  const id = p.nombre + "|enc|" + it.r;
+  const fuera = estado === "Ya no aplica";
+  const titulo = it.titulo || (campos.find(f => f.etiqueta === "Qué") && val(p.nombre, campos.find(f => f.etiqueta === "Qué"))) || "Encargo nuevo";
+  const det = h("details", { class: "encargo" + (fuera ? " fuera" : ""), open: E.abiertos.has(id) && !fuera },
+    h("summary", {}, h("span", { class: "enc-tit" }, titulo),
+      origen ? h("span", { class: "enc-origen" }, origen.split(" · ")[0]) : null,
+      h("span", { class: "pastilla " + (estado ? (fuera ? "gris" : "ok") : "pend") }, estado || "Sin contestar")),
+    card);
+  det.addEventListener("toggle", () => det.open ? E.abiertos.add(id) : E.abiertos.delete(id));
+  return det;
 }
 /* ---------- fotos de las tareas (del índice del repositorio) ---------- */
 function galeria(id) {
@@ -463,7 +589,7 @@ function precargarFotos() {  // con conexión, deja las miniaturas de las tareas
   for (const id of ids) for (const g of REPO.fotosDe(id)) for (const f of g.archivos) if (n++ < 300) fetch(REPO.miniatura(f.id, 400), { mode: "no-cors", credentials: "include" }).catch(() => {});
 }
 
-const OPC = f => /^(Observaciones|Nota|Notas|Lo que dice el responsable|Nueva fecha propuesta|Otra medida que propone|Decisión|Tipo de evidencia|Evidencia vista|Foto o nota|Notas de la entrevista)/i.test(f.etiqueta);
+const OPC = f => /^(Observaciones|Nota|Notas|Lo que dice el responsable|Nueva fecha propuesta|Otra medida|Otras medidas|Decisión|Tipo de evidencia|Evidencia vista|Foto o nota|Notas de la entrevista)/i.test(f.etiqueta);
 const OBLIG = f => /^(Comprobado|Motivo del retraso|Estado|Resultado|¿Recibido hoy\?)$/.test(f.etiqueta);
 
 function campoUI(p, it, f) {
@@ -518,6 +644,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("offline", () => estadoGuardado());
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") guardarEnDrive(false); });
   $("#hojas").addEventListener("click", () => { E.vista = "inicio"; E.modelo = null; pintar(); });
+  $("#cerrar").addEventListener("click", cerrarHoja);
   $("#tab-hoja").addEventListener("click", () => { if (E.vista === "repo") { E.vista = E.modelo ? "hoja" : "inicio"; pintar(); } });
   $("#tab-repo").addEventListener("click", () => { E.vista = "repo"; pintar(); });
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});

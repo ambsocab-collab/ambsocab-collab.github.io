@@ -46,7 +46,7 @@ const MODELO = (() => {
       }
       if (llenas.length === 1 && llenas[0].rol === "B") {
         if (!sec) nueva("");
-        const f = llenas[0].fill; const color = f === "B03A2E" ? "rojo" : f === "4E8F69" ? "verde" : f === "8A5A00" ? "ambar" : "area";
+        const f = llenas[0].fill; const color = f === "B03A2E" ? "rojo" : f === "4E8F69" ? "verde" : f === "8A5A00" ? "ambar" : f === "5B6770" ? "gris" : f === "1155CC" ? "azul" : f === "2E6B50" ? "seccion" : "area";   // seccion: «MIS TAREAS» / «HEREDADAS» (11-11-2026)
         sec.entradas.push({ tipo: "rotulo", texto: llenas[0].v, color, ayuda: llenas[0].ayuda }); continue;
       }
       if (llenas.length === 1 && !llenas[0].rol && llenas[0].c === 1 && !llenas[0].f) {

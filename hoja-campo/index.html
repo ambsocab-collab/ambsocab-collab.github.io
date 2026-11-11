@@ -83,6 +83,26 @@ h3{margin:0;font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:v
 .tit-seccion{margin-top:8px;padding-bottom:6px;border-bottom:2px solid var(--verde)}
 .rotulo{padding:10px 14px;border-radius:8px;font-weight:700;font-size:15px;color:#fff;background:var(--verde-osc)}
 .rotulo.rojo{background:var(--rojo)} .rotulo.verde{background:#4E8F69} .rotulo.ambar{background:var(--ambar);color:#fff}
+.rotulo.gris{background:#5B6770} .rotulo.azul{background:#1155CC}
+/* Tareas (11-11-2026): sección «MIS TAREAS» / «HEREDADAS» y tarjeta con columna a la derecha */
+.rotulo.seccion{background:transparent;color:var(--verde-osc);border-bottom:2px solid var(--verde-osc);border-radius:0;padding:6px 2px;font-size:14px;letter-spacing:.04em}
+.ficha.tarea{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px 18px;align-items:start}
+.tarea-main{display:flex;flex-direction:column;gap:10px;min-width:0}
+.tarea-lado{display:flex;flex-direction:column;gap:10px;min-width:0}
+.datos-lado{flex-direction:column;gap:4px}
+.datos-lado .dato-chip{font-size:12px;background:transparent;border:none;padding:0}
+.tarea-lado .fotos-fila{display:grid;grid-template-columns:1fr 1fr;gap:6px;overflow:visible}
+.tarea-lado .foto{width:100%;height:auto;aspect-ratio:4/3}
+.tarea-lado .fotos-fila .foto:first-child:last-child{grid-column:1 / -1}
+.carpetas{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:13px}
+.carpeta{color:var(--verde);text-decoration:none;font-weight:600}
+.historica{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:8px 4px;border-bottom:1px solid var(--borde);font-size:14px}
+.historica .id{font-family:ui-monospace,monospace;font-size:12px;color:var(--gris)}
+.historica .h-tit{flex:1 1 240px;min-width:0}
+.historica .h-enl{display:flex;gap:10px}
+@media (max-width:700px){.ficha.tarea{grid-template-columns:minmax(0,1fr)}.tarea-lado .fotos-fila{display:flex;overflow-x:auto}.tarea-lado .foto{width:150px;flex:none}}
+details.plegable{margin:8px 0} details.plegable>summary{cursor:pointer;list-style:none} details.plegable>summary::-webkit-details-marker{display:none}
+details.plegable>summary::before{content:"▸ "} details.plegable[open]>summary::before{content:"▾ "} details.plegable>.cuerpo{padding-top:8px}
 .seg{display:flex;flex-wrap:wrap;gap:6px}
 .seg button{border:1px solid var(--borde);background:var(--sup);border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:700;min-height:44px}
 .seg button[aria-selected="true"]{background:var(--verde);border-color:var(--verde);color:#fff}
@@ -93,6 +113,17 @@ h3{margin:0;font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:v
 .ficha-titulo{margin:0;font-weight:700;max-width:75ch}
 .pastilla{font-size:12px;font-weight:700;padding:2px 8px;border-radius:99px}
 .pastilla.mal{background:var(--fondo-rojo);color:var(--rojo)}
+.pastilla.ok{background:#e3f1e8;color:var(--verde)}.pastilla.pend{background:#fff4d6;color:#8a5a00}.pastilla.gris{background:#eceff1;color:#5b6770}
+/* «Encargos» plegables (11-11-2026) */
+details.encargo{background:var(--sup);border:1px solid var(--borde);border-radius:10px;margin-bottom:10px}
+details.encargo>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 14px}
+details.encargo>summary::-webkit-details-marker{display:none}
+details.encargo>summary::before{content:"▸";color:var(--verde);font-weight:700}
+details.encargo[open]>summary::before{content:"▾"}
+details.encargo .enc-tit{font-weight:700;flex:1 1 60%}
+details.encargo .enc-origen{font-size:12px;color:#5b6770;background:#f1f3f4;border-radius:6px;padding:2px 6px}
+details.encargo>.ficha{border:none;border-top:1px solid var(--borde);border-radius:0 0 10px 10px}
+details.encargo.fuera .enc-tit{text-decoration:line-through;color:#8a949b}
 .datos{display:flex;flex-wrap:wrap;gap:6px}
 .dato-chip{font-size:13px;background:var(--fondo-gris);border:1px solid var(--borde);border-radius:6px;padding:3px 8px;max-width:100%}
 .dato-chip .k{color:var(--gris)}
@@ -200,6 +231,7 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
     <div class="acciones" id="acciones-hoja" hidden>
       <button class="btn" id="hojas" type="button">Hojas</button>
       <button class="btn primario" id="guardar" type="button">Guardar</button>
+      <button class="btn cerrar" id="cerrar" type="button" aria-label="Cerrar la hoja (guarda antes)" title="Cerrar la hoja (guarda antes)">✕</button>
     </div>
   </div>
   <div class="tabs" role="tablist">
@@ -211,7 +243,7 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
   <nav class="carril" id="nav" aria-label="Pestañas de la hoja" hidden></nav>
   <main id="vista"></main>
 </div>
-<input id="cargar" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+<input id="cargar" type="file" accept=".json,application/json,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
 <input id="cargar-repo" type="file" accept=".json,application/json" hidden>
 <div class="toast" id="toast" role="status" hidden></div>
 <dialog id="dialogo"></dialog>
