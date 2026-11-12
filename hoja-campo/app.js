@@ -579,12 +579,12 @@ function galeria(id) {
   const todas = grupos.flatMap(g => g.archivos.map(f => ({ ...f, tipo: g.tipo })));
   const cont = h("div", { class: "fotos" });
   for (const g of grupos) {
-    cont.append(h("div", { class: "fotos-cab" }, h("span", {}, `${g.tipo} · ${g.archivos.length}`), h("a", { href: g.carpeta, target: "_blank", rel: "noopener" }, "Carpeta ↗")));
+    cont.append(h("div", { class: "fotos-cab" }, h("span", {}, `${g.tipo} · ${g.archivos.length}`), g.carpeta ? h("a", { href: g.carpeta, target: "_blank", rel: "noopener" }, "Carpeta ↗") : null));
     const fila = h("div", { class: "fotos-fila" });
     for (const f of g.archivos) {
       const img = h("img", { src: f.src || REPO.miniatura(f.id, 400), alt: f.n, loading: "lazy", referrerpolicy: "no-referrer" });
       const b = h("button", { type: "button", class: "foto", title: f.n, onclick: () => verFoto(todas, todas.findIndex(x => x.id === f.id)) }, img);
-      img.addEventListener("error", () => (window.caches ? caches.open("hoja-campo-fotos").then(c => c.delete(img.src)) : 0, b.replaceWith(h("a", { class: "foto sin", href: f.u, target: "_blank", rel: "noopener" }, "Foto ↗"))));
+      img.addEventListener("error", () => (window.caches ? caches.open("hoja-campo-fotos").then(c => c.delete(img.src)) : 0, b.replaceWith(h("a", { class: "foto sin", href: f.u || g.carpeta || "#", target: "_blank", rel: "noopener" }, "Foto ↗"))));
       fila.append(b);
     }
     cont.append(fila);
@@ -594,12 +594,12 @@ function galeria(id) {
 function verFoto(lista, i) {
   const d = $("#visor"); d.innerHTML = "";
   const f = lista[i];
-  const img = h("img", { src: REPO.miniatura(f.id, 1600), alt: f.n, referrerpolicy: "no-referrer" });
+  const img = h("img", { src: /^local-/.test(f.id) ? f.src : REPO.miniatura(f.id, 1600), alt: f.n, referrerpolicy: "no-referrer" });   // las del repositorio solo traen la miniatura
   img.addEventListener("error", () => f.src && img.src !== f.src ? (img.src = f.src) : img.replaceWith(h("p", {}, "No se puede mostrar aquí (sin conexión o sin sesión de Google). Ábrela en Drive.")));   // sin la grande, la miniatura del .json
   d.append(h("div", { class: "visor-cab" }, h("span", {}, `${f.tipo} · ${i + 1} de ${lista.length}`), h("button", { type: "button", class: "btn", onclick: () => d.close() }, "Cerrar")),
     img, h("div", { class: "acciones" },
       h("button", { type: "button", class: "btn", disabled: i === 0, onclick: () => verFoto(lista, i - 1) }, "‹ Anterior"),
-      h("a", { class: "btn", href: f.u, target: "_blank", rel: "noopener" }, "Abrir en Drive ↗"),
+      f.u ? h("a", { class: "btn", href: f.u, target: "_blank", rel: "noopener" }, "Abrir en Drive ↗") : null,
       h("button", { type: "button", class: "btn", disabled: i === lista.length - 1, onclick: () => verFoto(lista, i + 1) }, "Siguiente ›")));
   if (!d.open) d.showModal();
 }
