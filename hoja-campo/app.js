@@ -41,12 +41,14 @@ const TONO = { "Hecha y eficaz": "ok", "Conforme": "ok", "Cumple": "ok", "Hecha"
 const E = { vista: "hoja", hoja: null, libro: null, modelo: null, sec: null, grupo: {}, abiertos: new Set(), instalar: null };
 const val = (hoja, f) => { const ed = E.hoja.edits[hoja] || {}; return f.ref in ed ? ed[f.ref] : f.v; };
 let guardarT = null;
-function poner(hoja, f, v) {
+// Autoguardado (Bernardo, 12-11-2026: «cada vez que actualice un campo»): al momento en el dispositivo y en Drive
+// enseguida: las casillas de elegir (chips, Sí/No, listas, fechas) al instante; el texto, al dejar de escribir y al salir de él.
+function poner(hoja, f, v, ms = 2000) {
   (E.hoja.edits[hoja] ||= {});
   if (v === f.v) delete E.hoja.edits[hoja][f.ref]; else E.hoja.edits[hoja][f.ref] = v;
   ((E.hoja.pendiente ||= {})[hoja] ||= {})[f.ref] = v;   // lo que falta escribir en la hoja de Google
   E.hoja.actualizada = Date.now();
-  programarGuardado();
+  programarGuardado(ms);
   clearTimeout(guardarT);
   guardarT = setTimeout(async () => {
     try { await DB.guardar(E.hoja); estadoGuardado(); }
@@ -226,7 +228,7 @@ function marcarObligatorias() {  // las tareas bajo el rótulo rojo (retrasadas)
 
 /* ---------- guardar en la hoja de Google (sin exportar: 14-10-2026) ----------
    Lo rellenado se guarda al momento en el dispositivo y, con conexión, se escribe en la hoja de Google de la visita
-   (acción guardar_hoja de la Apps Script): pocos segundos después de cada cambio, al volver la conexión, al salir de
+   (acción guardar_hoja de la Apps Script): enseguida tras cada cambio (las de elegir al instante; el texto al dejar de escribir), al volver la conexión, al salir de
    la app y con el botón «Guardar». Sin conexión queda pendiente y se manda en cuanto la haya. */
 const nPendientes = () => Object.values((E.hoja && E.hoja.pendiente) || {}).reduce((a, o) => a + Object.keys(o || {}).length, 0);
 const horaCorta = t => new Date(t).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
@@ -238,7 +240,7 @@ function estadoGuardado(txt) {
     : navigator.onLine ? `${n} cambios sin guardar en Drive` : `Sin conexión · ${n} cambios se guardarán al volver`);
 }
 let guardadoT = null, guardando = false;
-function programarGuardado() { clearTimeout(guardadoT); guardadoT = setTimeout(() => guardarEnDrive(false), 6000); }
+function programarGuardado(ms = 2000) { clearTimeout(guardadoT); guardadoT = setTimeout(() => guardarEnDrive(false), ms); }
 async function idDrive(h) {   // la hoja de Google de esta hoja: la que se trajo, o la que se llama igual en Drive
   if (h.driveId) return h.driveId;
   const j = await REPO.pedir({ accion: "hojas" });
@@ -249,7 +251,7 @@ async function idDrive(h) {   // la hoja de Google de esta hoja: la que se trajo
 async function guardarEnDrive(aMano) {
   if (!E.hoja || guardando) return;
   const n = nPendientes();
-  if (!n) { if (aMano) aviso("No hay cambios por guardar: la hoja de Google está al día."); estadoGuardado(); return; }
+  if (!n) { if (aMano) aviso(E.hoja.enDrive ? `Todo guardado en Drive (último, ${horaCorta(E.hoja.enDrive)}): se guarda solo al cambiar cada casilla.` : "No hay cambios por guardar: la hoja de Drive está al día."); estadoGuardado(); return; }
   if (!REPO.conectado()) { if (aMano) aviso("Conecta la app con Drive (Repositorio PRL → Conectar con Drive) para guardar en la hoja de Google."); estadoGuardado(); return; }
   if (!navigator.onLine) { if (aMano) aviso("Sin conexión: lo rellenado está a salvo en el dispositivo y se guardará en Drive al volver la conexión."); estadoGuardado(); return; }
   guardando = true; estadoGuardado("Guardando en Drive…");
@@ -268,7 +270,7 @@ async function guardarEnDrive(aMano) {
     if (r.rechazadas && r.rechazadas.length) aviso(`Guardado en Drive, salvo ${r.rechazadas.length} casilla(s) que en la hoja de Google no son de rellenar.`);
     else if (aMano) aviso(`Guardado en la hoja de Google (${r.guardadas} casillas).`);
   } catch (e) { if (aMano) aviso("No se pudo guardar en Drive: " + e.message + ". Lo rellenado sigue en el dispositivo."); }
-  finally { guardando = false; estadoGuardado(); }
+  finally { guardando = false; estadoGuardado(); if (h.enDrive && Date.now() - h.enDrive < 5000 && nPendientes()) programarGuardado(); }   // lo cambiado mientras guardaba (solo si este guardado fue bien: sin bucle si Drive falla)
 }
 
 /* ✕ junto a «Guardar» (Bernardo, 03-11-2026): cerrar siempre guarda antes (en el dispositivo y, con conexión, en la hoja
@@ -619,7 +621,7 @@ function campoUI(p, it, f) {
   const etiqueta = f.etiqueta || (it.campos.length === 1 ? "" : "");
   const ayuda = f.ayuda ? h("details", { class: "ayuda" }, h("summary", { "aria-label": "Ayuda" }, "?"), h("p", {}, f.ayuda)) : null;
   const marca = it.obligatoria && OBLIG(f) ? h("span", { class: "req" }, "obligatorio") : null;
-  const cambiar = nv => { poner(p.nombre, f, nv); pintarSuave(); };
+  const cambiar = nv => { poner(p.nombre, f, nv, 300); pintarSuave(); };
   if (f.opts && f.opts.length) {
     const sino = f.opts.length === 2 && f.opts.includes("Sí") && f.opts.includes("No");
     if (sino) {
@@ -648,7 +650,7 @@ function campoUI(p, it, f) {
   const ta = h("textarea", { id, rows: "1", placeholder: etiqueta ? "" : "Escribe aquí" }); ta.value = v || "";
   const crecer = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; };
   ta.addEventListener("input", () => { poner(p.nombre, f, ta.value); crecer(); });
-  ta.addEventListener("change", pintarSuave);
+  ta.addEventListener("change", () => { programarGuardado(300); pintarSuave(); });
   requestAnimationFrame(crecer);
   return h("div", { class: "campo" }, etiqueta ? h("label", { for: id }, etiqueta, marca) : null, ta, ayuda);
 }
