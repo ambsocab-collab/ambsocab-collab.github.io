@@ -109,14 +109,14 @@ async function cargarArchivo(file) {
 function deVisita(v, nombre) {
   if (!v || !/^hoja-campo\//.test(v.formato || "") || !v.esqueleto) throw new Error("no es una hoja de campo en JSON");
   return { nombre: (v.nombre || nombre.replace(/\.json$/i, "")) + ".json", bytes: base64ABytes(v.esqueleto), respuestas: v.respuestas || {},
-           nativas: v.pestanas || [], orden: v.orden || [] };
+           nativas: v.pestanas || [], orden: v.orden || [], miniaturas: v.miniaturas || null };
 }
 function deDrive(r) {   // la respuesta de la acción «hoja»: .json o .xlsx
   if (r.formato === "json") return deVisita(JSON.parse(r.json), r.nombre);
   return { nombre: /\.xlsx$/i.test(r.nombre) ? r.nombre : r.nombre + ".xlsx", bytes: base64ABytes(r.datos), respuestas: null, nativas: [], orden: [] };
 }
 const idDe = nombre => nombre.replace(/\.(xlsx|json)$/i, "");
-const extraVisita = v => ({ respuestas: (v && v.respuestas) || null, nativas: (v && v.nativas) || [], orden: (v && v.orden) || [] });
+const extraVisita = v => ({ respuestas: (v && v.respuestas) || null, nativas: (v && v.nativas) || [], orden: (v && v.orden) || [], miniaturas: (v && v.miniaturas) || null });
 /* guarda una hoja de Drive en el dispositivo sin abrirla (la de hoy o la próxima, para tenerla sin cobertura);
    nunca pisa una que ya tenga casillas rellenadas */
 async function guardarSinAbrir(nombre, bytes, modificado, driveId, v) {
@@ -570,8 +570,11 @@ function plegableEncargo(p, it, card, campos) {
   return det;
 }
 /* ---------- fotos de las tareas (del índice del repositorio) ---------- */
+// Miniaturas (12-11-2026): primero las que trae el propio .json (las baja el montaje: en la tablet drive.google.com/thumbnail
+// no carga desde aquí); si no trae, el índice de Drive como antes.
+const miniaturasDe = id => (E.hoja && E.hoja.miniaturas && E.hoja.miniaturas[id]) || null;
 function galeria(id) {
-  const grupos = REPO.fotosDe(id);
+  const propias = miniaturasDe(id), grupos = propias || REPO.fotosDe(id);
   if (!grupos.length) return null;
   const todas = grupos.flatMap(g => g.archivos.map(f => ({ ...f, tipo: g.tipo })));
   const cont = h("div", { class: "fotos" });
@@ -579,7 +582,7 @@ function galeria(id) {
     cont.append(h("div", { class: "fotos-cab" }, h("span", {}, `${g.tipo} · ${g.archivos.length}`), h("a", { href: g.carpeta, target: "_blank", rel: "noopener" }, "Carpeta ↗")));
     const fila = h("div", { class: "fotos-fila" });
     for (const f of g.archivos) {
-      const img = h("img", { src: REPO.miniatura(f.id, 400), alt: f.n, loading: "lazy", referrerpolicy: "no-referrer" });
+      const img = h("img", { src: f.src || REPO.miniatura(f.id, 400), alt: f.n, loading: "lazy", referrerpolicy: "no-referrer" });
       const b = h("button", { type: "button", class: "foto", title: f.n, onclick: () => verFoto(todas, todas.findIndex(x => x.id === f.id)) }, img);
       img.addEventListener("error", () => (window.caches ? caches.open("hoja-campo-fotos").then(c => c.delete(img.src)) : 0, b.replaceWith(h("a", { class: "foto sin", href: f.u, target: "_blank", rel: "noopener" }, "Foto ↗"))));
       fila.append(b);
@@ -592,7 +595,7 @@ function verFoto(lista, i) {
   const d = $("#visor"); d.innerHTML = "";
   const f = lista[i];
   const img = h("img", { src: REPO.miniatura(f.id, 1600), alt: f.n, referrerpolicy: "no-referrer" });
-  img.addEventListener("error", () => img.replaceWith(h("p", {}, "No se puede mostrar aquí (sin conexión o sin sesión de Google). Ábrela en Drive.")));
+  img.addEventListener("error", () => f.src && img.src !== f.src ? (img.src = f.src) : img.replaceWith(h("p", {}, "No se puede mostrar aquí (sin conexión o sin sesión de Google). Ábrela en Drive.")));   // sin la grande, la miniatura del .json
   d.append(h("div", { class: "visor-cab" }, h("span", {}, `${f.tipo} · ${i + 1} de ${lista.length}`), h("button", { type: "button", class: "btn", onclick: () => d.close() }, "Cerrar")),
     img, h("div", { class: "acciones" },
       h("button", { type: "button", class: "btn", disabled: i === 0, onclick: () => verFoto(lista, i - 1) }, "‹ Anterior"),
@@ -604,7 +607,7 @@ function precargarFotos() {  // con conexión, deja las miniaturas de las tareas
   if (!navigator.onLine || !E.modelo) return;
   const ids = new Set(); for (const p of E.modelo) for (const { it } of fichas(p)) if (it.id && /^T-/.test(it.id)) ids.add(it.id);
   let n = 0;
-  for (const id of ids) for (const g of REPO.fotosDe(id)) for (const f of g.archivos) if (n++ < 300) fetch(REPO.miniatura(f.id, 400), { mode: "no-cors", credentials: "include" }).catch(() => {});
+  for (const id of ids) if (!miniaturasDe(id)) for (const g of REPO.fotosDe(id)) for (const f of g.archivos) if (n++ < 300) fetch(REPO.miniatura(f.id, 400), { mode: "no-cors", credentials: "include" }).catch(() => {});
 }
 
 const OPC = f => /^(Observaciones|Nota|Notas|Lo que dice el responsable|Nueva fecha propuesta|Otra medida|Otras medidas|Decisión|Tipo de evidencia|Evidencia vista|Foto o nota|Notas de la entrevista)/i.test(f.etiqueta);
