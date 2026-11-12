@@ -73,6 +73,8 @@ function avance(p) {
   let hechas = 0, total = 0;
   for (const { s, it } of fichas(p)) {
     if (it.plantilla && !it.campos.some(f => val(p.nombre, f))) continue;
+    if (it.si_ref && !fichaVisible(p, it)) continue;          // las que no salen no cuentan
+    if (p.nombre === "Verificaciones" && !it.si_ref) continue;    // el hueco de verificación vacío no es una tarea pendiente
     const gs = s.grupos.length ? s.grupos.filter(g => g.conDatos || it.campos.some(f => f.grupo === g.id && val(p.nombre, f))).map(g => g.id) : [""];
     for (const g of gs) { const c = contestada(p.nombre, it, g); if (c === null) continue; total++; if (c) hechas++; }
   }
@@ -439,6 +441,7 @@ function pintarSeccion(p, sec) {
       bloque = { nombre: e.bloque, det, cuerpo: h("div", { class: "cuerpo" }), hechas: 0, total: 0 };
       det.append(bloque.cuerpo); contenedor.append(det); cuerpo = bloque.cuerpo;
     }
+    if (e.si_ref && !fichaVisible(p, e)) continue;   // Verificaciones (12-11-2026): sale según el valor de otra casilla
     if (e.plantilla && !e.campos.some(f => val(p.nombre, f))) {
       if (plantillas++ > 0) continue;
       cuerpo.append(h("button", { type: "button", class: "btn anadir", onclick: () => { e.plantilla = false; pintar(); } }, "+ Añadir fila"));
@@ -460,8 +463,17 @@ function tabla(sec) {
   return h("div", { class: "tabla" }, t);
 }
 
+// Un campo con «si» (Novedades, 12-11-2026) solo se enseña cuando el campo que nombra tiene ese valor (p. ej. «¿Hay?» = Sí)
+const visible = (p, it, f) => { if (!f.si) return true; const v = val(p.nombre, it.campos.find(x => x.etiqueta === f.si.campo) || {});
+  return f.si.no_vacio ? !!v : v === f.si.valor; };
+// El valor de una casilla de la pestaña por su ref (para las fichas con «si_ref»)
+function valorRef(p, ref) {
+  for (const s of p.secciones) for (const e of s.entradas) if (e.tipo === "ficha") { const f = e.campos.find(x => x.ref === ref); if (f) return val(p.nombre, f); }
+  return "";
+}
+const fichaVisible = (p, e) => { const v = valorRef(p, e.si_ref.ref); return e.si_ref.no_vacio ? !!v : v === e.si_ref.valor; };
 function fichaUI(p, sec, it, g) {
-  const campos = it.campos.filter(f => !g || !f.grupo || f.grupo === g);
+  const campos = it.campos.filter(f => (!g || !f.grupo || f.grupo === g) && visible(p, it, f));
   const info = it.info.filter(i => !g || !i.grupo || i.grupo === g);
   if (!campos.length && !info.length && !it.titulo) return null;
   const est = contestada(p.nombre, it, g || "");
@@ -485,10 +497,10 @@ function fichaUI(p, sec, it, g) {
   }
   if (esTarea) return fichaTarea(p, it, card, datos, campos, est);
   if (datos.children.length) card.append(datos);
-  if (it.detalle) card.append(h("details", { class: "mas" }, h("summary", {}, "Ver detalle"), h("p", { class: "detalle" }, it.detalle)));
+  if (it.detalle) card.append(h("details", { class: "mas" }, h("summary", {}, it.detalle_titulo || "Ver detalle"), h("p", { class: "detalle" }, it.detalle)));
   if (it.id && /^T-[A-Z]{3}-\d{4}$/.test(it.id)) { const g = galeria(it.id); if (g) card.append(g); }
   const principales = [], secundarios = [];
-  for (const f of campos) (OPC(f) && campos.length > 2 ? secundarios : principales).push(f);
+  for (const f of campos) (OPC(f) && campos.length > 2 && !["Novedades", "Comprobaciones", "Verificaciones"].includes(p.nombre) ? secundarios : principales).push(f);   // en Novedades, todo a la vista al abrirse
   for (const f of principales) card.append(campoUI(p, it, f));
   if (secundarios.length) {
     const id = p.nombre + "|" + it.r + "|mas";

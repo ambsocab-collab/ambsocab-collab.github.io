@@ -132,11 +132,13 @@ const MODELO = (() => {
         if (e.tipo === "hueco") continue;
         if (e.tipo !== "ficha") { sec.entradas.push({ ...e }); continue; }
         const it = { tipo: "ficha", r: ++r, id: e.id || null, titulo: e.titulo || null, sub: e.sub || null, bloque: null,
+                     si_ref: e.si_ref || null, detalle_titulo: e.detalle_titulo || "",   // la ficha sale solo con ese valor en otra casilla (Verificaciones, 12-11-2026)
                      detalle: e.detalle || "", obligatoria: !!e.obligatoria, nativa: true, sinCabecera: false, plantilla: false,
                      info: (e.info || []).map(i => ({ etiqueta: i.etiqueta, v: i.v, enlace: i.enlace || null, grupo: null,
                                                       hoja: nombres.has(i.v) ? i.v : null, ayuda: i.ayuda || "" })),
                      campos: (e.campos || []).map(f => ({ ref: f.ref, etiqueta: f.etiqueta, ayuda: f.ayuda || "", opts: f.opts || null,
-                                                          fecha: !!f.fecha, v: f.v == null ? "" : f.v, grupo: null })) };
+                                                          fecha: !!f.fecha, v: f.v == null ? "" : f.v, grupo: null,
+                                                          si: f.si || null })) };   // «si»: solo con ese valor en otro campo (12-11-2026)
         const clave = it.campos.find(f => f.v === "" && !OPCIONAL.test(f.etiqueta));
         it.claves = new Map(clave ? [["", clave.ref]] : []);
         sec.entradas.push(it);
