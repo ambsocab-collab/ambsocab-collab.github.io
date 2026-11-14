@@ -38,6 +38,16 @@ header.barra{position:sticky;top:0;z-index:20;background:var(--verde-osc);color:
 .tabs{display:flex;gap:4px}
 .tab{border:0;background:transparent;color:var(--tinta-sobre-verde);opacity:.8;padding:10px 16px;font-weight:700;font-size:15px;border-radius:8px 8px 0 0;cursor:pointer}
 .tab[aria-current="true"]{background:var(--bg);color:var(--verde-osc);opacity:1}
+.correo-dia{margin:18px 0 6px;font-size:15px}
+.correo-ficha{margin:8px 0;padding:12px 14px}
+.correo-cab{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.correo-ficha .hechos{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px}
+.correo-ficha .botones{display:inline-flex;gap:6px;margin-left:6px}
+.correo-ficha .opciones{display:grid;gap:6px;margin-top:8px}
+.correo-ficha .opcion{text-align:left}
+.correo-ficha .opcion[aria-pressed="true"]{outline:2px solid var(--verde)}
+.chip{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:#e6e6e6;color:#222624;white-space:nowrap}
+.chip.espera_si{background:#f6d7a7}.chip.pendiente_datos{background:#f3c6c1}.chip.en_marcha{background:#cfe6d6}.chip.hecha{background:#dfe6e1}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .tab[aria-current="true"]{color:var(--verde)}}
 .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--borde);background:var(--sup);color:var(--texto);padding:9px 14px;border-radius:8px;font-weight:700;cursor:pointer;min-height:44px;text-decoration:none}
 .btn:hover{border-color:var(--verde)}
@@ -237,6 +247,7 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
   <div class="tabs" role="tablist">
     <button class="tab" id="tab-hoja" type="button" aria-current="true">Hoja de campo</button>
     <button class="tab" id="tab-repo" type="button" aria-current="false">Repositorio PRL</button>
+    <button class="tab" id="tab-correo" type="button" aria-current="false">Correo</button>
   </div>
 </header>
 <div class="app">
@@ -254,5 +265,6 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
 <script src="modelo.js"></script>
 <script src="app.js"></script>
 <script src="repo.js"></script>
+<script src="correo.js"></script>
 </body>
 </html>

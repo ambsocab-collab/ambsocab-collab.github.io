@@ -300,14 +300,16 @@ function confirmar(texto, si) {
 function pintar() {
   $("#tab-hoja").setAttribute("aria-current", String(E.vista === "hoja" || E.vista === "inicio"));
   $("#tab-repo").setAttribute("aria-current", String(E.vista === "repo"));
+  $("#tab-correo").setAttribute("aria-current", String(E.vista === "correo"));
   const hayHoja = E.vista === "hoja" && E.modelo;
   $("#acciones-hoja").hidden = !hayHoja;
-  $("#titulo").textContent = hayHoja ? E.hoja.titulo : E.vista === "repo" ? "Repositorio del sistema de PRL" : "Hoja de campo";
+  $("#titulo").textContent = hayHoja ? E.hoja.titulo : E.vista === "repo" ? "Repositorio del sistema de PRL" : E.vista === "correo" ? "Correo" : "Hoja de campo";
   $("#guardado").textContent = ""; if (hayHoja) estadoGuardado();
   const nav = $("#nav"); nav.innerHTML = ""; nav.hidden = !hayHoja;
   document.querySelector(".app").classList.toggle("sin-nav", !hayHoja);
   const main = $("#vista"); main.innerHTML = "";
   if (E.vista === "repo") return REPO.pintar(main);
+  if (E.vista === "correo") return CORREO.pintar(main);
   if (!hayHoja) return pintarInicio(main);
   for (const p of E.modelo) {
     const [cod, nom] = p.nombre.includes(" · ") ? p.nombre.split(" · ") : ["", p.nombre];
@@ -680,8 +682,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") guardarEnDrive(false); });
   $("#hojas").addEventListener("click", () => { E.vista = "inicio"; E.modelo = null; pintar(); });
   $("#cerrar").addEventListener("click", cerrarHoja);
-  $("#tab-hoja").addEventListener("click", () => { if (E.vista === "repo") { E.vista = E.modelo ? "hoja" : "inicio"; pintar(); } });
+  $("#tab-hoja").addEventListener("click", () => { if (E.vista === "repo" || E.vista === "correo") { E.vista = E.modelo ? "hoja" : "inicio"; pintar(); } });
   $("#tab-repo").addEventListener("click", () => { E.vista = "repo"; pintar(); });
+  $("#tab-correo").addEventListener("click", () => { E.vista = "correo"; pintar(); });
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   await REPO.iniciar();
