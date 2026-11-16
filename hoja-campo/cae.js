@@ -11,7 +11,10 @@
    `ot.py cae_informe vista --centro <C>`. */
 "use strict";
 const CAE = (() => {
-  let vista = null, cola = [], estado = "", abiertas = {};
+  let vista = null, cola = [], estado = "", abiertas = {}, busca = "";
+  const nombreDe = emp => emp.nombre || emp.empresa;
+  const sinTildes = t => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const casa = (emp, q) => !q || [emp.nombre, emp.empresa, emp.persona, ...emp.trabajadores.map(t => t.nombre)].some(x => sinTildes(x).includes(q));
   const VISTO = ["En plataforma", "En altura", "Carretilla o pala", "Camión o grúa", "Espacio confinado", "Riesgo eléctrico", "Zona ATEX", "Soldadura o corte"];
   const ACTIVIDAD = { "En plataforma": "en plataforma elevadora", "En altura": "trabajando en altura", "Carretilla o pala": "con carretilla o pala",
     "Camión o grúa": "con camión o grúa", "Espacio confinado": "en espacio confinado", "Riesgo eléctrico": "con riesgo eléctrico",
@@ -82,7 +85,7 @@ const CAE = (() => {
       const d = $("#dialogo"); d.innerHTML = "";
       const dir = h("input", { type: "email", placeholder: "correo@empresa.es", class: "cae-input", "aria-label": "Correo de la empresa", value: emp.correo_contrata || "" });
       const lista = (emp.seguimiento || []).filter(x => x.estado === "abierto");
-      d.append(h("h3", {}, "Correo a " + emp.empresa),
+      d.append(h("h3", {}, "Correo a " + nombreDe(emp)), h("p", { class: "nota" }, emp.empresa),
         h("p", { class: "nota" }, "Se prepara un borrador en tu Outlook con esto (no se envía: lo envías tú):"),
         h("ul", {}, lista.map(x => h("li", {}, x.trabajador + ": " + x.texto))),
         ...(emp.correo_contrata ? [h("p", { class: "nota" }, "Para: " + emp.correo_contrata)]
@@ -103,7 +106,7 @@ const CAE = (() => {
       const d = $("#dialogo"); d.innerHTML = "";
       const campo = (ph, lista) => h("input", { type: "text", placeholder: ph, class: "cae-input", "aria-label": ph, list: lista || null });
       const nombre = campo("Nombre y apellidos"), dni = campo("DNI (si lo ves)"), empresa = campo("Empresa", "cae-empresas"), act = campo("Qué está haciendo");
-      const datalist = h("datalist", { id: "cae-empresas" }, (vista ? vista.empresas : []).map(e => h("option", { value: e.empresa })));
+      const datalist = h("datalist", { id: "cae-empresas" }, (vista ? vista.empresas : []).map(e => h("option", { value: nombreDe(e) })));
       d.append(h("h3", {}, "Alguien que no está en el cuaderno"), h("p", { class: "nota" }, "Se comprueba en QUIOO en la próxima sesión."),
         nombre, dni, empresa, datalist, act, h("div", { class: "acciones" },
           h("button", { type: "button", class: "btn", onclick: () => { d.close(); ok(null); } }, "Cancelar"),
@@ -176,12 +179,13 @@ const CAE = (() => {
 
   function empresa(emp) {
     const mal = emp.incidencias > 0 || !emp.en_regla;
-    const abierta = emp.caso in abiertas ? abiertas[emp.caso] : mal;
+    const abierta = busca ? true : emp.caso in abiertas ? abiertas[emp.caso] : mal;
     const correoPedido = hechos(emp.caso).some(x => x.tipo === "correo");
     const correo = correoPedido && !/enviado|borrador/.test(emp.correo || "") ? "correo pedido: se prepara en tu Outlook" : emp.correo;
     const resumen = [emp.trabajadores.length + " trabajador(es)", (emp.dentro || 0) + " dentro", mal ? emp.incidencias + " con incidencias" : "en regla"].join(" · ");
     const d = h("details", { class: "panel cae-emp" + (mal ? " cae-mal" : ""), "data-caso": emp.caso },
-      h("summary", {}, h("div", { class: "cae-sum" }, h("strong", {}, emp.empresa), h("span", { class: "nota" }, resumen),
+      h("summary", {}, h("div", { class: "cae-sum" }, h("strong", {}, nombreDe(emp)),
+        emp.persona ? h("span", { class: "nota" }, "Autónomo: " + emp.persona) : null, h("span", { class: "nota" }, resumen),
         correo ? h("span", { class: "nota cae-correo" }, "✉ " + correo) : null)));
     if (abierta) d.setAttribute("open", "");
     d.addEventListener("toggle", () => { abiertas[emp.caso] = d.open; DB.set("cae-abiertas", abiertas); });
@@ -193,7 +197,7 @@ const CAE = (() => {
     if (emp.por_pedir && !correoPedido) {
       d.append(h("div", { class: "cae-acciones" }, h("button", { type: "button", class: "btn primario", onclick: async () => {
         const para = await pedirCorreo(emp);
-        if (para !== null) hacer({ tipo: "correo", caso: emp.caso, para }, "Correo a " + emp.empresa);
+        if (para !== null) hacer({ tipo: "correo", caso: emp.caso, para }, "Correo a " + nombreDe(emp));
       } }, "✉ Preparar correo a la empresa")));
     }
     emp.trabajadores.forEach(t => d.append(trabajador(emp, t)));
@@ -220,7 +224,7 @@ const CAE = (() => {
     if (vista && vista.alertas && vista.alertas.length) {
       s.append(h("article", { class: "panel cae-alerta" }, h("h3", {}, "Ir a ver"),
         vista.alertas.map(a => h("p", {}, chipV(a.veredicto), " ", h("strong", {}, a.nombre),
-          h("span", { class: "nota" }, " · " + a.empresa + (a.dentro ? " · dentro" : "")), h("br"),
+          h("span", { class: "nota" }, " · " + nombreDe((vista.empresas.find(e => e.empresa === a.empresa)) || a) + (a.dentro ? " · dentro" : "")), h("br"),
           a.por_que, h("br"), h("span", { class: a.decision ? "cae-hecho" : "aviso-nc" }, a.decision ? "✔ " + a.decision : "Sin decisión todavía")))));
     }
     s.append(h("div", { class: "cae-acciones" },
@@ -229,10 +233,21 @@ const CAE = (() => {
       } }, "＋ Alguien que no está en el cuaderno"),
       vista && vista.empresas.length > 1 ? [h("button", { type: "button", class: "btn", onclick: () => plegarTodo(true) }, "Abrir todas"),
         h("button", { type: "button", class: "btn", onclick: () => plegarTodo(false) }, "Plegar todas")] : null));
+    if (vista && vista.empresas.length > 3) {
+      const caja = h("input", { type: "search", class: "cae-input cae-busca", placeholder: "🔍 Buscar empresa o persona", value: busca, "aria-label": "Buscar empresa o persona" });
+      caja.addEventListener("input", () => { busca = sinTildes(caja.value.trim()); const pos = caja.selectionStart; pintar().then(() => { const c = document.querySelector(".cae-busca"); if (c) { c.focus(); c.setSelectionRange(pos, pos); } }); });
+      s.append(caja);
+    }
     const altas = (vista && vista.ya || []).concat(cola).filter(x => x.tipo === "alta");
     if (altas.length) s.append(h("p", { class: "nota" }, "Pendientes de comprobar en QUIOO: " + altas.map(x => x.nombre || x.dni).join(", ")));
     if (!vista || !vista.empresas.length) s.append(h("p", { class: "nota" }, "Sin CAE de hoy."));
-    else for (const emp of vista.empresas) s.append(empresa(emp));
+    else {
+      const mal = e => e.incidencias > 0 || !e.en_regla;
+      const lista = [...vista.empresas].filter(e => casa(e, busca))
+        .sort((a, b) => (mal(b) - mal(a)) || sinTildes(nombreDe(a)).localeCompare(sinTildes(nombreDe(b))));
+      if (!lista.length) s.append(h("p", { class: "nota" }, "Nada coincide con «" + busca + "»."));
+      for (const emp of lista) s.append(empresa(emp));
+    }
     main.append(s);
     window.scrollTo({ top: y });
   }
