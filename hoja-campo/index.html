@@ -45,6 +45,21 @@ header.barra{position:sticky;top:0;z-index:20;background:var(--verde-osc);color:
 .correo-ficha .botones{display:inline-flex;gap:6px;margin-left:6px}
 .correo-ficha .opciones{display:grid;gap:6px;margin-top:8px}
 .correo-ficha .opcion{text-align:left}
+.cae-t{padding:10px 0;border-top:1px solid #e3e3e3}.cae-t .botones{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.cae-alerta{border-left:6px solid #b03a2e;padding:12px 14px}.aviso-nc{color:#8a1c12;font-weight:600;margin:4px 0}
+.cae-emp{margin:8px 0;padding:10px 14px;border-left:6px solid #4e8f69}.cae-emp.cae-mal{border-left-color:#b03a2e}
+.cae-emp>summary{cursor:pointer;list-style:none}.cae-emp>summary::-webkit-details-marker{display:none}
+.cae-emp>summary::before{content:"▸";float:left;margin-right:8px;color:var(--verde)}.cae-emp[open]>summary::before{content:"▾"}
+.cae-sum{display:grid;gap:2px}.cae-correo{color:var(--verde)}.cae-seg ul{margin:4px 0;padding-left:18px}
+.cae-t-cab{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.cae-t-mal{background:color-mix(in srgb,var(--rojo) 7%,transparent);margin:0 -14px;padding:10px 14px}
+.cae-v{font-size:12px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap}.cae-v.ok{background:#cfe6d6;color:#14532d}.cae-v.mal{background:#f3c6c1;color:#7f1d1d}.cae-v.gris{background:#e6e6e6;color:#333}
+.cae-lbl{margin-top:8px}.cae-chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.cae-chip{border:1px solid var(--borde);background:var(--sup);color:var(--texto);border-radius:999px;padding:8px 12px;min-height:40px;font-weight:600;cursor:pointer}
+.cae-chip[aria-pressed="true"]{background:var(--verde);border-color:var(--verde);color:#fff}
+.cae-acciones{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.cae-hecho{color:var(--verde);font-weight:700;margin:4px 0}
+.cae-input{width:100%;box-sizing:border-box;min-height:44px;margin:6px 0;padding:8px 10px;border:1px solid var(--borde);border-radius:8px;background:var(--sup);color:var(--texto);font:inherit}
+.cae-opciones{display:grid;gap:6px;margin:8px 0}.cae-opciones .opcion{text-align:left}
+.cae-franja{display:block;width:100%;text-align:left;border:0;border-radius:10px;background:#fbe3e0;color:#7f1d1d;font-weight:700;padding:12px 14px;margin:0 0 12px;min-height:44px;cursor:pointer}
 .correo-ficha .opcion[aria-pressed="true"]{outline:2px solid var(--verde)}
 .chip{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:#e6e6e6;color:#222624;white-space:nowrap}
 .chip.espera_si{background:#f6d7a7}.chip.pendiente_datos{background:#f3c6c1}.chip.en_marcha{background:#cfe6d6}.chip.hecha{background:#dfe6e1}
@@ -248,6 +263,7 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
     <button class="tab" id="tab-hoja" type="button" aria-current="true">Hoja de campo</button>
     <button class="tab" id="tab-repo" type="button" aria-current="false">Repositorio PRL</button>
     <button class="tab" id="tab-correo" type="button" aria-current="false">Correo</button>
+    <button class="tab" id="tab-cae" type="button" aria-current="false">CAE</button>
   </div>
 </header>
 <div class="app">
@@ -266,5 +282,6 @@ dialog .acciones{justify-content:flex-end;margin-top:12px}
 <script src="app.js"></script>
 <script src="repo.js"></script>
 <script src="correo.js"></script>
+<script src="cae.js"></script>
 </body>
 </html>
