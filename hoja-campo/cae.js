@@ -86,17 +86,17 @@ const CAE = (() => {
       const dir = h("input", { type: "email", placeholder: "correo@empresa.es", class: "cae-input", "aria-label": "Correo de la empresa", value: emp.correo_contrata || "" });
       const lista = (emp.seguimiento || []).filter(x => x.estado === "abierto");
       d.append(h("h3", {}, "Correo a " + nombreDe(emp)), h("p", { class: "nota" }, emp.empresa),
-        h("p", { class: "nota" }, "Se prepara un borrador en tu Outlook con esto (no se envía: lo envías tú):"),
+        h("p", { class: "nota" }, "Se preparan dos borradores en tu Outlook (no se envían: los envías tú): uno al centro, para que no deje acceder, y otro a la empresa, avisando de que no podrá acceder a los trabajos hasta regularizar esto:"),
         h("ul", {}, lista.map(x => h("li", {}, x.trabajador + ": " + x.texto))),
         ...(emp.correo_contrata ? [h("p", { class: "nota" }, "Para: " + emp.correo_contrata)]
-          : [h("p", { class: "nota" }, "No tenemos su correo: escríbelo (en QUIOO, quien sube su documentación)."), dir]),
+          : [h("p", { class: "nota" }, "No tenemos el correo de la empresa: escríbelo (en QUIOO, OnBoarding, ficha de la empresa)."), dir]),
         h("div", { class: "acciones" },
           h("button", { type: "button", class: "btn", onclick: () => { d.close(); ok(null); } }, "Cancelar"),
           h("button", { type: "button", class: "btn primario", onclick: () => {
             const v = emp.correo_contrata || dir.value.trim();
             if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { dir.focus(); aviso("Escribe un correo válido"); return; }
             d.close(); ok(emp.correo_contrata ? "" : v);
-          } }, "Preparar borrador")));
+          } }, "Preparar los dos borradores")));
       d.showModal(); if (!emp.correo_contrata) dir.focus();
     });
   }
@@ -198,7 +198,7 @@ const CAE = (() => {
       d.append(h("div", { class: "cae-acciones" }, h("button", { type: "button", class: "btn primario", onclick: async () => {
         const para = await pedirCorreo(emp);
         if (para !== null) hacer({ tipo: "correo", caso: emp.caso, para }, "Correo a " + nombreDe(emp));
-      } }, "✉ Preparar correo a la empresa")));
+      } }, "✉ Avisar al centro y a la empresa")));
     }
     emp.trabajadores.forEach(t => d.append(trabajador(emp, t)));
     return d;
